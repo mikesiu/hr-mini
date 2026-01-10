@@ -1,0 +1,16 @@
+# Node.js dependencies
+node_modules/
+
+# env / secrets
+.env
+*.env
+
+# build outputs
+dist/
+build/
+
+# OS / editor
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
