@@ -1,16 +1,23 @@
-# Node.js dependencies
+# ===== Dependencies =====
 node_modules/
 
-# env / secrets
+# ===== Python =====
+.venv/
+__pycache__/
+*.pyc
+
+# ===== Database / runtime data =====
+*.db
+files/
+backups/
+
+# ===== Environment variables =====
 .env
 *.env
 
-# build outputs
-dist/
-build/
-
-# OS / editor
+# ===== OS / editor =====
 .vscode/
 .idea/
 Thumbs.db
 .DS_Store
+
