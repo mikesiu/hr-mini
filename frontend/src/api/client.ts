@@ -8,7 +8,8 @@ const getApiBaseUrl = () => {
     return process.env.REACT_APP_API_URL;
   }
 
-  const port = process.env.REACT_APP_API_PORT || '8001';
+  // Keep default aligned with backend/start-backend.bat
+  const port = process.env.REACT_APP_API_PORT || '8888';
 
   // If accessing via IP address (not localhost), use that same IP for API
   const hostname = window.location.hostname;
@@ -193,6 +194,46 @@ export const companyAPI = {
   delete: (id: string) => apiClient.delete(`/companies/${id}`),
   getPayPeriods: (companyId: string, year: number) =>
     apiClient.get(`/companies/${companyId}/pay-periods`, { params: { year } }),
+  getVacationPercentTiers: (companyId: string) =>
+    apiClient.get(`/companies/${companyId}/vacation-percent-tiers`),
+  replaceVacationPercentTiers: (
+    companyId: string,
+    tiers: Array<{
+      min_years: number;
+      max_years?: number | null;
+      percent: number;
+      union_member?: boolean;
+    }>
+  ) => apiClient.put(`/companies/${companyId}/vacation-percent-tiers`, { tiers }),
+  applyBcEsaVacationTiers: (companyId: string) =>
+    apiClient.post(`/companies/${companyId}/vacation-percent-tiers/bc-esa-default`),
+};
+
+export const leavePayrollAPI = {
+  listOpenings: (params?: { company_id?: string; employee_id?: string; year?: number }) =>
+    apiClient.get('/leave-payroll/vacation-openings', { params }),
+  upsertOpening: (data: {
+    employee_id: string;
+    company_id: string;
+    year: number;
+    opening_amount: number;
+  }) => apiClient.put('/leave-payroll/vacation-openings', data),
+  previewPayrollImport: (companyId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('company_id', companyId);
+    formData.append('file', file);
+    return apiClient.post('/leave-payroll/payroll-details/upload/preview', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  commitPayrollImport: (companyId: string, file: File) => {
+    const formData = new FormData();
+    formData.append('company_id', companyId);
+    formData.append('file', file);
+    return apiClient.post('/leave-payroll/payroll-details/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
 
 // Salary API
@@ -386,6 +427,17 @@ export const reportsAPI = {
     group_by?: string;
     group_by_secondary?: string;
   }) => apiClient.get('/reports/leave-taken', { params }),
+
+  // Vacation Pay Ledger (deferred vacation companies)
+  vacationPayLedger: (params?: {
+    start_date?: string;
+    end_date?: string;
+    company_id?: string;
+    employee_status?: string;
+    employee_id?: string;
+    employee_ids?: string;
+    search_term?: string;
+  }) => apiClient.get('/reports/vacation-pay-ledger', { params }),
   
   // Salary Analysis Report
   salaryAnalysis: (params?: {

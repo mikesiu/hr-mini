@@ -16,12 +16,12 @@ MYSQL_CHARSET = os.getenv("MYSQL_CHARSET", "utf8mb4")
 DB_PATH = Path(__file__).parent.parent.parent / "hr.db"
 
 # Local backup staging area (fast local disk)
-BACKUP_LOCAL_DIR = Path(os.getenv("BACKUP_LOCAL_DIR", r"D:\hr-mini\backups"))
+BACKUP_LOCAL_DIR = Path(os.getenv("BACKUP_LOCAL_DIR", r"C:\hr-mini\backups"))
 
 # Google Drive (destination) – safe for backups, not for live DB
 BACKUP_DRIVE_DIR = Path(os.getenv("BACKUP_DRIVE_DIR", r"G:\Shared drives\4.HR & Payroll\Backups"))
 
-FILES_ROOT = Path(os.getenv("FILES_ROOT", r"D:\hr-mini\files"))  # store receipts locally (optional)
+FILES_ROOT = Path(os.getenv("FILES_ROOT", r"C:\hr-mini\files"))  # store receipts locally (optional)
 
 # Ensure local folders exist
 BACKUP_LOCAL_DIR.mkdir(parents=True, exist_ok=True)

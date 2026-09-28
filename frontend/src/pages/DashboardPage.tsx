@@ -34,6 +34,7 @@ import { format, startOfMonth, addMonths } from 'date-fns';
 import { dashboardAPI, holidayAPI } from '../api/client';
 import { useCompanyFilter } from '../hooks/useCompanyFilter';
 import PayrollCalendar from '../components/dashboard/PayrollCalendar';
+import WorkPermitAlertCard from '../components/dashboard/WorkPermitAlertCard';
 
 interface PayrollEvent {
   date: string;
@@ -364,6 +365,9 @@ const DashboardPage: React.FC = () => {
           </>
         )}
       </Paper>
+
+      {/* Work permit expiry alerts (terminated staff excluded by API) */}
+      <WorkPermitAlertCard />
 
       {/* Legend */}
       <Paper sx={{ p: 2, mb: 3 }}>

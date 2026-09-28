@@ -48,6 +48,8 @@ class EmployeeBase(BaseModel):
     remarks: Optional[str] = None
     paystub: bool = False
     union_member: bool = False
+    vacation_percent: Optional[float] = Field(None, description="Vacation pay percent e.g. 4.0 for 4%")
+    vacation_percent_override: bool = False
     use_mailing_address: bool = False
     mailing_street: Optional[str] = Field(None, max_length=255)
     mailing_city: Optional[str] = Field(None, max_length=100)
@@ -55,6 +57,14 @@ class EmployeeBase(BaseModel):
     mailing_postal_code: Optional[str] = Field(None, max_length=20)
     emergency_contact_name: Optional[str] = Field(None, max_length=255)
     emergency_contact_phone: Optional[str] = Field(None, max_length=20)
+
+    @validator("vacation_percent", pre=True)
+    def empty_vacation_percent_to_none(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
 class EmployeeCreate(EmployeeBase):
     pass
@@ -79,6 +89,8 @@ class EmployeeUpdate(BaseModel):
     remarks: Optional[str] = None
     paystub: Optional[bool] = None
     union_member: Optional[bool] = None
+    vacation_percent: Optional[float] = None
+    vacation_percent_override: Optional[bool] = None
     use_mailing_address: Optional[bool] = None
     mailing_street: Optional[str] = Field(None, max_length=255)
     mailing_city: Optional[str] = Field(None, max_length=100)
@@ -86,6 +98,14 @@ class EmployeeUpdate(BaseModel):
     mailing_postal_code: Optional[str] = Field(None, max_length=20)
     emergency_contact_name: Optional[str] = Field(None, max_length=255)
     emergency_contact_phone: Optional[str] = Field(None, max_length=20)
+
+    @validator("vacation_percent", pre=True)
+    def empty_vacation_percent_to_none(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
 class EmployeeResponse(EmployeeBase):
     full_name: str
@@ -120,6 +140,10 @@ class CompanyBase(BaseModel):
     payroll_frequency: Optional[str] = Field(None, max_length=20, description="Options: bi-weekly, bi-monthly, monthly")
     cra_due_dates: Optional[str] = Field(None, max_length=50, description="Comma-separated list of day numbers (e.g., '15,30')")
     union_due_date: Optional[int] = Field(None, ge=1, le=31, description="Single day of month (1-31)")
+    vacation_pay_with_payroll: bool = Field(
+        default=True,
+        description="True if vacation pay is included with each payroll; False for deferred payout",
+    )
 
 class CompanyCreate(CompanyBase):
     pass
@@ -141,10 +165,35 @@ class CompanyUpdate(BaseModel):
     payroll_frequency: Optional[str] = Field(None, max_length=20, description="Options: bi-weekly, bi-monthly, monthly")
     cra_due_dates: Optional[str] = Field(None, max_length=50, description="Comma-separated list of day numbers (e.g., '15,30')")
     union_due_date: Optional[int] = Field(None, ge=1, le=31, description="Single day of month (1-31)")
+    vacation_pay_with_payroll: Optional[bool] = None
+
+class VacationPercentTierBase(BaseModel):
+    min_years: float = Field(..., ge=0)
+    max_years: Optional[float] = Field(None, description="Exclusive upper bound; null = open-ended")
+    percent: float = Field(..., ge=0)
+    union_member: bool = Field(
+        False,
+        description="True = union member schedule; False = non-union schedule",
+    )
+
+class VacationPercentTierResponse(VacationPercentTierBase):
+    id: int
+    company_id: str
+
+    class Config:
+        from_attributes = True
+
+class VacationPercentTierListResponse(BaseModel):
+    success: bool
+    data: List[VacationPercentTierResponse]
+
+class VacationPercentTierReplaceRequest(BaseModel):
+    tiers: List[VacationPercentTierBase]
 
 class CompanyResponse(CompanyBase):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    vacation_percent_tiers: Optional[List[VacationPercentTierResponse]] = None
     
     class Config:
         from_attributes = True
@@ -152,6 +201,36 @@ class CompanyResponse(CompanyBase):
 class CompanyListResponse(BaseModel):
     success: bool
     data: List[CompanyResponse]
+
+class VacationDollarOpeningBase(BaseModel):
+    employee_id: str
+    company_id: str
+    year: int
+    opening_amount: float = 0.0
+
+class VacationDollarOpeningCreate(VacationDollarOpeningBase):
+    pass
+
+class VacationDollarOpeningResponse(VacationDollarOpeningBase):
+    id: int
+    employee_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class VacationDollarOpeningListResponse(BaseModel):
+    success: bool
+    data: List[VacationDollarOpeningResponse]
+
+class PayrollImportPreviewResponse(BaseModel):
+    success: bool
+    data: dict
+
+class PayrollImportCommitResponse(BaseModel):
+    success: bool
+    data: dict
 
 # Dashboard schemas
 class PayrollCalendarEvent(BaseModel):

@@ -23,7 +23,7 @@ from schemas_reports import (
     ReportSummary, EmployeeReportData, EmploymentReportData, 
     LeaveReportData, LeaveBalanceData, LeaveTakenData, SalaryReportData, 
     ExpenseReportData, WorkPermitReportData, EmployeePersonalDetailsData,
-    EmployeeBasicProfileData,
+    EmployeeBasicProfileData, VacationPayLedgerData,
     GroupedReportData, GroupedReportResponse, SortField, SortDirection, GroupByField
 )
 
@@ -1363,3 +1363,224 @@ class ReportService:
                 sort_applied=None,
                 group_by_applied=[]
             )
+
+    def generate_vacation_pay_ledger_report(
+        self, filters: ReportFilterBase
+    ) -> Tuple[List[VacationPayLedgerData], ReportSummary]:
+        """
+        Calendar-year vacation pay ledger for deferred-vacation companies.
+        One row per imported payroll detail line; running dollar vacation balance.
+        """
+        from decimal import Decimal
+        from collections import defaultdict
+
+        from repos.vacation_payroll_repo import list_payroll_periods, get_opening, get_opening_amount
+        from repos.leave_repo import get_leaves_in_range
+        from repos.company_repo import get_company_by_id
+        from models.base import SessionLocal
+        from models.leave_type import LeaveType
+        from services.leave_service import get_sick_remaining
+        from services.leave_pay_helpers import (
+            leave_days_overlapping,
+            format_leave_dates,
+            sick_pay_for_period,
+        )
+        from services.payroll_period_service import calculate_pay_periods
+        from services.vacation_percent_service import compute_employee_vacation_percent
+        from repos.employee_repo_ext import is_employee_eligible_for_sick_leave
+
+        try:
+            if not filters.company_id:
+                raise ValueError("company_id is required for vacation pay ledger")
+
+            company = get_company_by_id(filters.company_id)
+            if not company:
+                raise ValueError(f"Company '{filters.company_id}' not found")
+            if getattr(company, "vacation_pay_with_payroll", True):
+                raise ValueError(
+                    "Vacation pay ledger applies only when vacation is not paid with payroll "
+                    "(set vacation_pay_with_payroll=false on the company)"
+                )
+
+            year = filters.start_date.year if filters.start_date else date.today().year
+            if filters.end_date:
+                year = filters.end_date.year
+            # Prefer explicit year via start_date Jan 1 pattern; also allow search year in notes — use start_date year
+            year_start = date(year, 1, 1)
+            year_end = date(year, 12, 31)
+
+            periods_map = {}
+            try:
+                for p in calculate_pay_periods(filters.company_id, year):
+                    periods_map[(p.start_date, p.end_date)] = p
+            except Exception:
+                periods_map = {}
+
+            payroll_rows = list_payroll_periods(
+                filters.company_id, year, employee_id=None
+            )
+
+            selected_ids = filters.resolved_employee_ids()
+
+            # Group by employee for running balance
+            by_employee: Dict[str, list] = defaultdict(list)
+            for row in payroll_rows:
+                if selected_ids and row.employee_id not in selected_ids:
+                    continue
+                by_employee[row.employee_id].append(row)
+
+            report_data: List[VacationPayLedgerData] = []
+
+            for employee_id, rows in by_employee.items():
+                employee = get_employee(employee_id)
+                if not employee:
+                    continue
+                if filters.search_term:
+                    term = filters.search_term.lower()
+                    if term not in (employee.full_name or "").lower() and term not in employee_id.lower():
+                        continue
+                if filters.employee_status and filters.employee_status not in (None, "All"):
+                    if filters.employee_status == "Active & Probation":
+                        if employee.status not in ("Active", "Probation"):
+                            continue
+                    elif employee.status != filters.employee_status:
+                        continue
+
+                opening_row = get_opening(employee_id, filters.company_id, year)
+                opening = float(opening_row.opening_amount) if opening_row else 0.0
+                opening_missing = opening_row is None
+                running = Decimal(str(opening))
+
+                # Leaves for whole year (filter per period)
+                year_leaves = get_leaves_in_range(employee_id, year_start, year_end)
+                with SessionLocal() as session:
+                    typed = []
+                    for lv in year_leaves:
+                        if (lv.status or "Active") != "Active":
+                            continue
+                        lt = session.get(LeaveType, lv.leave_type_id)
+                        code = lt.code if lt else ""
+                        typed.append((lv, code))
+
+                vac_leaves = [lv for lv, code in typed if code == "VAC"]
+                sick_leaves = [lv for lv, code in typed if code == "SICK"]
+
+                rows_sorted = sorted(rows, key=lambda r: (r.pay_date, r.cheque_no or ""))
+                for row in rows_sorted:
+                    period_start = row.period_start
+                    period_end = row.period_end
+                    # Resolve pay period from company calendar using pay_date (authoritative)
+                    pay_period_label = ""
+                    for (ps, pe), p in periods_map.items():
+                        if ps <= row.pay_date <= pe or (
+                            p.payment_date and p.payment_date == row.pay_date
+                        ):
+                            period_start = ps
+                            period_end = pe
+                            pay_period_label = f"{ps.isoformat()} to {pe.isoformat()}"
+                            break
+                    if not pay_period_label:
+                        if period_start and period_end:
+                            pay_period_label = f"{period_start.isoformat()} to {period_end.isoformat()}"
+                        else:
+                            pay_period_label = row.pay_date.isoformat()
+
+                    win_start = period_start or row.pay_date
+                    win_end = period_end or row.pay_date
+
+                    # Vacation taken in window
+                    vac_in = []
+                    vac_days = 0.0
+                    for lv in vac_leaves:
+                        d = leave_days_overlapping(
+                            lv.start_date, lv.end_date, lv.days, win_start, win_end, filters.company_id
+                        )
+                        if d > 0:
+                            vac_in.append(lv)
+                            vac_days += d
+
+                    sick_days, sick_pay, sick_dates = sick_pay_for_period(
+                        employee_id, sick_leaves, win_start, win_end, filters.company_id
+                    )
+
+                    gross = float(row.gross or 0)
+                    benefits = float(getattr(row, "benefits", None) or 0)
+                    vac_paid = float(row.vacation_paid or 0)
+                    vac_earned = float(row.vacation_earned or 0)
+
+                    pct = compute_employee_vacation_percent(employee, filters.company_id, as_of=win_end)
+                    pct_f = float(pct) if pct is not None else None
+                    # Vacation % applies to Gross − Benefits (payroll vacationable earnings)
+                    vacationable = max(0.0, gross - benefits)
+                    expected = (
+                        round(vacationable * (pct_f / 100.0), 2) if pct_f is not None else None
+                    )
+
+                    running = running + Decimal(str(vac_earned)) - Decimal(str(vac_paid))
+
+                    # Sick balance as of period end (calendar year)
+                    if is_employee_eligible_for_sick_leave(employee_id, win_end):
+                        # YTD sick taken through period end
+                        ytd_sick = 0.0
+                        for lv in sick_leaves:
+                            ytd_sick += leave_days_overlapping(
+                                lv.start_date, lv.end_date, lv.days, year_start, win_end, filters.company_id
+                            )
+                        sick_balance = max(0.0, 5.0 - ytd_sick)
+                    else:
+                        sick_balance = 0.0
+
+                    report_data.append(
+                        VacationPayLedgerData(
+                            employee_id=employee_id,
+                            employee_name=employee.full_name,
+                            pay_period=pay_period_label,
+                            pay_date=row.pay_date,
+                            period_start=win_start,
+                            period_end=win_end,
+                            gross_pay=gross,
+                            benefits=benefits,
+                            sick_pay=sick_pay,
+                            vacation_paid=vac_paid,
+                            vacation_percent=pct_f,
+                            vacation_amount_earned=vac_earned,
+                            vacation_earned_expected=expected,
+                            vacation_taken_days=vac_days,
+                            vacation_taken_dates=format_leave_dates(vac_in),
+                            vacation_balance=float(running),
+                            sick_leave_balance=sick_balance,
+                            sick_leave_taken_days=sick_days,
+                            sick_leave_taken_dates=sick_dates,
+                            opening_balance=opening,
+                            opening_balance_missing=opening_missing,
+                            cheque_no=row.cheque_no,
+                        )
+                    )
+
+            summary = ReportSummary(
+                total_records=len(report_data),
+                total_pages=1,
+                current_page=1,
+                records_per_page=len(report_data),
+                generated_at=datetime.now(),
+                filters_applied={
+                    k: v
+                    for k, v in {
+                        "company_id": filters.company_id,
+                        "year": year,
+                        "employee_status": filters.employee_status,
+                        "employee_id": filters.employee_id,
+                        "employee_ids": filters.employee_ids,
+                        "search_term": filters.search_term,
+                        "start_date": filters.start_date.isoformat() if filters.start_date else None,
+                    }.items()
+                    if v is not None and v != ""
+                },
+            )
+            return report_data, summary
+        except Exception as e:
+            print(f"Error generating vacation pay ledger report: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+

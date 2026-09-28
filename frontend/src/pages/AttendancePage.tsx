@@ -7,7 +7,7 @@ import {
   Autocomplete,
 } from '@mui/material';
 import {
-  Add, Edit, Upload, FileDownload, Clear, Refresh, Delete,
+  Add, Edit, Upload, FileDownload, Clear, Refresh, Delete, Print,
 } from '@mui/icons-material';
 import { attendanceAPI, companyAPI, employeeAPI } from '../api/client';
 import { useCompanyFilter } from '../contexts/CompanyFilterContext';
@@ -93,8 +93,225 @@ interface Employee {
   last_name: string;
 }
 
+interface DetailedRowSubtotal {
+  employee_id: string;
+  employee_name: string;
+  regular_hours: number;
+  ot_hours: number;
+  weekend_ot_hours: number;
+  stat_holiday_hours: number;
+}
+
+type DetailedRowWithSubtotal =
+  | { type: 'detail'; row: AttendanceDetailRow }
+  | { type: 'subtotal'; subtotal: DetailedRowSubtotal };
+
+function applyPeriodOverrideTotals(
+  employeeId: string,
+  calculated: { regular: number; ot: number; weekendOT: number; statHoliday: number },
+  reportPeriodOverrides: Map<string, any>
+) {
+  const override = reportPeriodOverrides.get(employeeId);
+  return {
+    regular_hours: override?.override_regular_hours !== null && override?.override_regular_hours !== undefined
+      ? override.override_regular_hours
+      : calculated.regular,
+    ot_hours: override?.override_ot_hours !== null && override?.override_ot_hours !== undefined
+      ? override.override_ot_hours
+      : calculated.ot,
+    weekend_ot_hours: override?.override_weekend_ot_hours !== null && override?.override_weekend_ot_hours !== undefined
+      ? override.override_weekend_ot_hours
+      : calculated.weekendOT,
+    stat_holiday_hours: override?.override_stat_holiday_hours !== null && override?.override_stat_holiday_hours !== undefined
+      ? override.override_stat_holiday_hours
+      : calculated.statHoliday,
+  };
+}
+
+function buildDetailedRowsWithSubtotals(
+  details: AttendanceDetailRow[],
+  reportPeriodOverrides: Map<string, any>
+): DetailedRowWithSubtotal[] {
+  const rowsWithSubtotals: DetailedRowWithSubtotal[] = [];
+  let currentEmployeeId: string | null = null;
+  let currentEmployeeName = '';
+  let calculatedRegular = 0;
+  let calculatedOT = 0;
+  let calculatedWeekendOT = 0;
+  let calculatedStatHoliday = 0;
+
+  details.forEach((row) => {
+    if (currentEmployeeId !== null && row.employee_id !== currentEmployeeId) {
+      rowsWithSubtotals.push({
+        type: 'subtotal',
+        subtotal: {
+          employee_id: currentEmployeeId,
+          employee_name: currentEmployeeName,
+          ...applyPeriodOverrideTotals(
+            currentEmployeeId,
+            {
+              regular: calculatedRegular,
+              ot: calculatedOT,
+              weekendOT: calculatedWeekendOT,
+              statHoliday: calculatedStatHoliday,
+            },
+            reportPeriodOverrides
+          ),
+        },
+      });
+      calculatedRegular = 0;
+      calculatedOT = 0;
+      calculatedWeekendOT = 0;
+      calculatedStatHoliday = 0;
+    }
+
+    rowsWithSubtotals.push({ type: 'detail', row });
+    calculatedRegular += row.regular_hours;
+    calculatedOT += row.ot_hours;
+    calculatedWeekendOT += row.weekend_ot_hours;
+    calculatedStatHoliday += row.stat_holiday_hours || 0;
+    currentEmployeeId = row.employee_id;
+    currentEmployeeName = row.employee_name;
+  });
+
+  if (currentEmployeeId !== null) {
+    rowsWithSubtotals.push({
+      type: 'subtotal',
+      subtotal: {
+        employee_id: currentEmployeeId,
+        employee_name: currentEmployeeName,
+        ...applyPeriodOverrideTotals(
+          currentEmployeeId,
+          {
+            regular: calculatedRegular,
+            ot: calculatedOT,
+            weekendOT: calculatedWeekendOT,
+            statHoliday: calculatedStatHoliday,
+          },
+          reportPeriodOverrides
+        ),
+      },
+    });
+  }
+
+  return rowsWithSubtotals;
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+const ATTENDANCE_PRINT_STYLES = `
+  body { font-family: Arial, sans-serif; margin: 20px; }
+  .report-header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+  .report-title { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
+  .report-subtitle { font-size: 14px; color: #666; }
+  .report-meta { font-size: 13px; color: #444; margin-bottom: 16px; }
+  .report-totals { margin-bottom: 16px; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { border: 1px solid #000; padding: 6px 8px; text-align: left; font-size: 11px; }
+  th { background-color: #f0f0f0; font-weight: bold; }
+  .subtotal-row { background-color: #f5f5f5; font-weight: bold; }
+  .weekend-row { background-color: #e8e8e8; }
+  .report-footer { margin-top: 30px; text-align: center; font-size: 10px; color: #666; border-top: 1px solid #ccc; padding-top: 10px; }
+`;
+
+function generateSummaryPrintTable(report: AttendanceReport): string {
+  const rows = report.summary.map((item) => `
+    <tr>
+      <td>${escapeHtml(item.employee_name)}</td>
+      <td>${item.total_regular_hours.toFixed(2)}</td>
+      <td>${item.total_ot_hours.toFixed(2)}</td>
+      <td>${item.total_weekend_ot_hours.toFixed(2)}</td>
+      <td>${item.total_stat_holiday_hours.toFixed(2)}</td>
+      <td>${item.total_days}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div class="report-totals">
+      <div>Total Regular Hours: ${report.total_regular_hours.toFixed(2)}</div>
+      <div>Total OT Hours: ${report.total_ot_hours.toFixed(2)}</div>
+      <div>Total Weekend OT: ${report.total_weekend_ot_hours.toFixed(2)}</div>
+      <div>Total Stat Holiday Hours: ${report.total_stat_holiday_hours.toFixed(2)}</div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Employee</th>
+          <th>Regular Hours</th>
+          <th>OT Hours</th>
+          <th>Weekend OT</th>
+          <th>Stat Holiday</th>
+          <th>Days</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function generateDetailedPrintTable(rowsWithSubtotals: DetailedRowWithSubtotal[]): string {
+  const rows = rowsWithSubtotals.map((item) => {
+    if (item.type === 'detail') {
+      const row = item.row;
+      const leaveStat = [row.leave_type, row.stat_holiday_name].filter(Boolean).join(' / ') || '-';
+      const rowClass = row.day_type === 'Weekend' ? 'weekend-row' : '';
+      return `
+        <tr class="${rowClass}">
+          <td>${escapeHtml(row.employee_name)}</td>
+          <td>${escapeHtml(row.date)}</td>
+          <td>${escapeHtml(leaveStat)}</td>
+          <td>${escapeHtml(row.check_in || '-')}</td>
+          <td>${escapeHtml(row.check_out || '-')}</td>
+          <td>${escapeHtml(row.day_type)}</td>
+          <td>${row.regular_hours.toFixed(2)}</td>
+          <td>${row.ot_hours.toFixed(2)}</td>
+          <td>${row.weekend_ot_hours.toFixed(2)}</td>
+          <td>${(row.stat_holiday_hours || 0).toFixed(2)}</td>
+        </tr>
+      `;
+    }
+
+    const subtotal = item.subtotal;
+    return `
+      <tr class="subtotal-row">
+        <td colspan="6" style="text-align: right;">Subtotal for ${escapeHtml(subtotal.employee_name)}:</td>
+        <td>${subtotal.regular_hours.toFixed(2)}</td>
+        <td>${subtotal.ot_hours.toFixed(2)}</td>
+        <td>${subtotal.weekend_ot_hours.toFixed(2)}</td>
+        <td>${(subtotal.stat_holiday_hours || 0).toFixed(2)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Employee</th>
+          <th>Date</th>
+          <th>Leave/Stat Holiday</th>
+          <th>Start Time</th>
+          <th>End Time</th>
+          <th>Weekday/Weekend</th>
+          <th>Reg Hours</th>
+          <th>OT Hours</th>
+          <th>Weekend OT</th>
+          <th>Stat Holiday</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
 const AttendancePage: React.FC = () => {
-  const { selectedCompanyId, setSelectedCompanyId } = useCompanyFilter();
+  const { selectedCompanyId, setSelectedCompanyId, selectedCompany } = useCompanyFilter();
   const [tabValue, setTabValue] = useState<number>(0);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [report, setReport] = useState<AttendanceReport | null>(null);
@@ -478,6 +695,82 @@ const AttendancePage: React.FC = () => {
     } catch (error: any) {
       setSnackbar({ open: true, message: `Error exporting report: ${error.response?.data?.detail || error.message}`, severity: 'error' });
     }
+  };
+
+  const handlePrintReport = () => {
+    let startDate = reportFilters.start_date;
+    let endDate = reportFilters.end_date;
+
+    if (reportPayPeriod) {
+      startDate = reportPayPeriod.start_date;
+      endDate = reportPayPeriod.end_date;
+    }
+
+    if (!startDate || !endDate) {
+      setSnackbar({ open: true, message: 'Please select a date range or pay period', severity: 'error' });
+      return;
+    }
+
+    if (!report && !detailedReport) {
+      setSnackbar({ open: true, message: 'Please generate a report first', severity: 'error' });
+      return;
+    }
+
+    const companyName = selectedCompany
+      ? (selectedCompany.trade_name || selectedCompany.legal_name)
+      : 'All Companies';
+    const employeeFilter = reportEmployeeId
+      ? employees.find((emp) => emp.id === reportEmployeeId)
+      : null;
+    const employeeLabel = employeeFilter
+      ? (employeeFilter.full_name || `${employeeFilter.first_name} ${employeeFilter.last_name}`)
+      : 'All Employees';
+    const payPeriodLabel = reportPayPeriod
+      ? `Period ${reportPayPeriod.period_number} (${reportPayPeriod.start_date} to ${reportPayPeriod.end_date})`
+      : null;
+    const viewLabel = reportView === 'detailed' ? 'Detailed' : 'Summary';
+    const tableHtml = reportView === 'detailed' && detailedReport
+      ? generateDetailedPrintTable(
+          buildDetailedRowsWithSubtotals(detailedReport.details, reportPeriodOverrides)
+        )
+      : report
+        ? generateSummaryPrintTable(report)
+        : '<p>No data available</p>';
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setSnackbar({ open: true, message: 'Unable to open print window. Please allow popups.', severity: 'error' });
+      return;
+    }
+
+    const printContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Attendance Report - ${viewLabel}</title>
+        <style>${ATTENDANCE_PRINT_STYLES}</style>
+      </head>
+      <body>
+        <div class="report-header">
+          <div class="report-title">Attendance Report — ${viewLabel}</div>
+          <div class="report-subtitle">Generated on ${new Date().toLocaleDateString()}</div>
+        </div>
+        <div class="report-meta">
+          <div><strong>Company:</strong> ${escapeHtml(companyName)}</div>
+          <div><strong>Date Range:</strong> ${escapeHtml(startDate)} to ${escapeHtml(endDate)}</div>
+          ${payPeriodLabel ? `<div><strong>Pay Period:</strong> ${escapeHtml(payPeriodLabel)}</div>` : ''}
+          <div><strong>Employee:</strong> ${escapeHtml(employeeLabel)}</div>
+        </div>
+        ${tableHtml}
+        <div class="report-footer">HR Management System — Attendance Report</div>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+    printWindow.print();
+    printWindow.close();
   };
 
   const handleOpenDialog = (att?: Attendance) => {
@@ -1801,15 +2094,26 @@ const AttendancePage: React.FC = () => {
                 </Box>
               </Grid>
               <Grid item xs={12} sm={6}>
-                <Button
-                  variant="outlined"
-                  startIcon={<FileDownload />}
-                  onClick={() => handleExportReport('excel')}
-                  disabled={!report && !detailedReport}
-                  fullWidth
-                >
-                  Export Excel
-                </Button>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Button
+                    variant="outlined"
+                    startIcon={<Print />}
+                    onClick={handlePrintReport}
+                    disabled={!report && !detailedReport}
+                    sx={{ flex: 1 }}
+                  >
+                    Print
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    startIcon={<FileDownload />}
+                    onClick={() => handleExportReport('excel')}
+                    disabled={!report && !detailedReport}
+                    sx={{ flex: 1 }}
+                  >
+                    Export Excel
+                  </Button>
+                </Box>
               </Grid>
             </Grid>
 
@@ -1861,96 +2165,11 @@ const AttendancePage: React.FC = () => {
             )}
 
             {detailedReport && reportView === 'detailed' && (() => {
-              // Group rows by employee and calculate subtotals
-              const rowsWithSubtotals: Array<{ type: 'detail' | 'subtotal'; row?: AttendanceDetailRow; subtotal?: { employee_id: string; employee_name: string; regular_hours: number; ot_hours: number; weekend_ot_hours: number; stat_holiday_hours: number } }> = [];
-              
-              let currentEmployeeId: string | null = null;
-              let currentEmployeeName: string = '';
-              let calculatedRegular = 0;
-              let calculatedOT = 0;
-              let calculatedWeekendOT = 0;
-              let calculatedStatHoliday = 0;
-              
-              detailedReport.details.forEach((row, index) => {
-                // If we've moved to a new employee, add subtotal for previous employee
-                if (currentEmployeeId !== null && row.employee_id !== currentEmployeeId) {
-                  // Apply period override if it exists
-                  const override = reportPeriodOverrides.get(currentEmployeeId);
-                  const finalRegular = override?.override_regular_hours !== null && override?.override_regular_hours !== undefined
-                    ? override.override_regular_hours
-                    : calculatedRegular;
-                  const finalOT = override?.override_ot_hours !== null && override?.override_ot_hours !== undefined
-                    ? override.override_ot_hours
-                    : calculatedOT;
-                  const finalWeekendOT = override?.override_weekend_ot_hours !== null && override?.override_weekend_ot_hours !== undefined
-                    ? override.override_weekend_ot_hours
-                    : calculatedWeekendOT;
-                  const finalStatHoliday = override?.override_stat_holiday_hours !== null && override?.override_stat_holiday_hours !== undefined
-                    ? override.override_stat_holiday_hours
-                    : calculatedStatHoliday;
-                  
-                  rowsWithSubtotals.push({
-                    type: 'subtotal',
-                    subtotal: {
-                      employee_id: currentEmployeeId,
-                      employee_name: currentEmployeeName,
-                      regular_hours: finalRegular,
-                      ot_hours: finalOT,
-                      weekend_ot_hours: finalWeekendOT,
-                      stat_holiday_hours: finalStatHoliday,
-                    }
-                  });
-                  // Reset subtotals for new employee
-                  calculatedRegular = 0;
-                  calculatedOT = 0;
-                  calculatedWeekendOT = 0;
-                  calculatedStatHoliday = 0;
-                }
-                
-                // Add the detail row
-                rowsWithSubtotals.push({ type: 'detail', row });
-                
-                // Accumulate subtotals
-                calculatedRegular += row.regular_hours;
-                calculatedOT += row.ot_hours;
-                calculatedWeekendOT += row.weekend_ot_hours;
-                calculatedStatHoliday += row.stat_holiday_hours || 0;
-                
-                // Update current employee
-                currentEmployeeId = row.employee_id;
-                currentEmployeeName = row.employee_name;
-              });
-              
-              // Add final subtotal
-              if (currentEmployeeId !== null) {
-                // Apply period override if it exists
-                const override = reportPeriodOverrides.get(currentEmployeeId);
-                const finalRegular = override?.override_regular_hours !== null && override?.override_regular_hours !== undefined
-                  ? override.override_regular_hours
-                  : calculatedRegular;
-                const finalOT = override?.override_ot_hours !== null && override?.override_ot_hours !== undefined
-                  ? override.override_ot_hours
-                  : calculatedOT;
-                const finalWeekendOT = override?.override_weekend_ot_hours !== null && override?.override_weekend_ot_hours !== undefined
-                  ? override.override_weekend_ot_hours
-                  : calculatedWeekendOT;
-                const finalStatHoliday = override?.override_stat_holiday_hours !== null && override?.override_stat_holiday_hours !== undefined
-                  ? override.override_stat_holiday_hours
-                  : calculatedStatHoliday;
-                
-                rowsWithSubtotals.push({
-                  type: 'subtotal',
-                  subtotal: {
-                    employee_id: currentEmployeeId,
-                    employee_name: currentEmployeeName,
-                    regular_hours: finalRegular,
-                    ot_hours: finalOT,
-                    weekend_ot_hours: finalWeekendOT,
-                    stat_holiday_hours: finalStatHoliday,
-                  }
-                });
-              }
-              
+              const rowsWithSubtotals = buildDetailedRowsWithSubtotals(
+                detailedReport.details,
+                reportPeriodOverrides
+              );
+
               return (
                 <Box>
                   <Typography variant="h6" gutterBottom>

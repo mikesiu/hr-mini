@@ -26,6 +26,7 @@ def create_company(
     payroll_frequency: str | None = None,
     cra_due_dates: str | None = None,
     union_due_date: int | None = None,
+    vacation_pay_with_payroll: bool = True,
     *,
     performed_by: str | None = None,
 ) -> Company:
@@ -50,6 +51,7 @@ def create_company(
             payroll_frequency=payroll_frequency.strip() if payroll_frequency else None,
             cra_due_dates=cra_due_dates.strip() if cra_due_dates else None,
             union_due_date=union_due_date,
+            vacation_pay_with_payroll=True if vacation_pay_with_payroll is None else bool(vacation_pay_with_payroll),
         )
         session.add(company)
         try:
@@ -108,7 +110,14 @@ def update_company(company_id: str, *, performed_by: str | None = None, **kwargs
             return None
 
         before = model_to_dict(company)
-        update_data = {k: v for k, v in kwargs.items() if v not in (None, "")}
+        # Allow explicit False for booleans; still skip None and empty strings
+        update_data = {}
+        for k, v in kwargs.items():
+            if v is None:
+                continue
+            if v == "" and k != "vacation_pay_with_payroll":
+                continue
+            update_data[k] = v
         if not update_data:
             return company
 

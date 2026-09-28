@@ -28,6 +28,8 @@ import {
   Select,
   MenuItem,
   Divider,
+  FormControlLabel,
+  Checkbox,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -38,6 +40,36 @@ import {
   LocationOn as LocationIcon,
 } from '@mui/icons-material';
 import { companyAPI } from '../api/client';
+
+interface VacationTier {
+  id?: number;
+  min_years: number;
+  max_years: number | null;
+  percent: number;
+  union_member: boolean;
+}
+
+const BC_ESA_TIERS = [
+  { min_years: 0, max_years: 5, percent: 4 },
+  { min_years: 5, max_years: null, percent: 6 },
+] as const;
+
+const CA_SCHEDULE_TIERS = [
+  { min_years: 0, max_years: 5, percent: 4 },
+  { min_years: 5, max_years: 11, percent: 6 },
+  { min_years: 11, max_years: 21, percent: 8 },
+  { min_years: 21, max_years: null, percent: 10 },
+] as const;
+
+const defaultVacationTiers = (): VacationTier[] => [
+  ...BC_ESA_TIERS.map((t) => ({ ...t, max_years: t.max_years as number | null, union_member: false })),
+  ...BC_ESA_TIERS.map((t) => ({ ...t, max_years: t.max_years as number | null, union_member: true })),
+];
+
+const withUnionFlag = (
+  schedule: ReadonlyArray<{ min_years: number; max_years: number | null; percent: number }>,
+  union_member: boolean
+): VacationTier[] => schedule.map((t) => ({ ...t, union_member }));
 
 interface Company {
   id: string;
@@ -55,6 +87,8 @@ interface Company {
   payroll_frequency?: string;
   cra_due_dates?: string;
   union_due_date?: number;
+  vacation_pay_with_payroll?: boolean;
+  vacation_percent_tiers?: VacationTier[];
   created_at?: string;
   updated_at?: string;
 }
@@ -75,6 +109,8 @@ interface CompanyFormData {
   payroll_frequency: string;
   cra_due_dates: string;
   union_due_date: string;
+  vacation_pay_with_payroll: boolean;
+  vacation_percent_tiers: VacationTier[];
 }
 
 const CompanyPage: React.FC = () => {
@@ -99,6 +135,8 @@ const CompanyPage: React.FC = () => {
     payroll_frequency: '',
     cra_due_dates: '',
     union_due_date: '',
+    vacation_pay_with_payroll: true,
+    vacation_percent_tiers: defaultVacationTiers(),
   });
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
 
@@ -147,6 +185,43 @@ const CompanyPage: React.FC = () => {
         payroll_frequency: company.payroll_frequency || '',
         cra_due_dates: company.cra_due_dates || '',
         union_due_date: company.union_due_date ? company.union_due_date.toString() : '',
+        vacation_pay_with_payroll: company.vacation_pay_with_payroll !== false,
+        vacation_percent_tiers: (() => {
+          const loaded = (company.vacation_percent_tiers || []).map((t) => ({
+            id: t.id,
+            min_years: t.min_years,
+            max_years: t.max_years ?? null,
+            percent: t.percent,
+            union_member: !!(t as VacationTier).union_member,
+          }));
+          if (!loaded.length) return defaultVacationTiers();
+          const hasUnion = loaded.some((t) => t.union_member);
+          const hasNonUnion = loaded.some((t) => !t.union_member);
+          // Legacy rows without union_member were treated as non-union; seed the missing group
+          if (!hasUnion && hasNonUnion) {
+            return [
+              ...loaded,
+              ...loaded.map((t) => ({
+                min_years: t.min_years,
+                max_years: t.max_years,
+                percent: t.percent,
+                union_member: true,
+              })),
+            ];
+          }
+          if (hasUnion && !hasNonUnion) {
+            return [
+              ...loaded.map((t) => ({
+                min_years: t.min_years,
+                max_years: t.max_years,
+                percent: t.percent,
+                union_member: false,
+              })),
+              ...loaded,
+            ];
+          }
+          return loaded;
+        })(),
       });
     } else {
       setEditingCompany(null);
@@ -166,6 +241,8 @@ const CompanyPage: React.FC = () => {
         payroll_frequency: '',
         cra_due_dates: '',
         union_due_date: '',
+        vacation_pay_with_payroll: true,
+        vacation_percent_tiers: defaultVacationTiers(),
       });
     }
     setDialogOpen(true);
@@ -190,6 +267,8 @@ const CompanyPage: React.FC = () => {
       payroll_frequency: '',
       cra_due_dates: '',
       union_due_date: '',
+      vacation_pay_with_payroll: true,
+      vacation_percent_tiers: defaultVacationTiers(),
     });
   };
 
@@ -210,17 +289,40 @@ const CompanyPage: React.FC = () => {
         payroll_frequency: formData.payroll_frequency || undefined,
         cra_due_dates: formData.cra_due_dates || undefined,
         union_due_date: formData.union_due_date && formData.union_due_date !== '' ? Number(formData.union_due_date) : undefined,
+        vacation_pay_with_payroll: formData.vacation_pay_with_payroll,
       };
+      const { vacation_percent_tiers, ...companyPayload } = cleanedFormData as any;
 
       if (editingCompany) {
-        await companyAPI.update(editingCompany.id, cleanedFormData);
+        await companyAPI.update(editingCompany.id, companyPayload);
+        await companyAPI.replaceVacationPercentTiers(
+          editingCompany.id,
+          formData.vacation_percent_tiers.map((t) => ({
+            min_years: Number(t.min_years),
+            max_years: t.max_years === null || t.max_years === ('' as any) ? null : Number(t.max_years),
+            percent: Number(t.percent),
+            union_member: !!t.union_member,
+          }))
+        );
         setSnackbar({
           open: true,
           message: 'Company updated successfully',
           severity: 'success',
         });
       } else {
-        await companyAPI.create(cleanedFormData);
+        await companyAPI.create(companyPayload);
+        // New company seeds BC ESA tiers on backend; overwrite if user edited
+        if (formData.id) {
+          await companyAPI.replaceVacationPercentTiers(
+            formData.id.toUpperCase(),
+            formData.vacation_percent_tiers.map((t) => ({
+              min_years: Number(t.min_years),
+              max_years: t.max_years === null || t.max_years === ('' as any) ? null : Number(t.max_years),
+              percent: Number(t.percent),
+              union_member: !!t.union_member,
+            }))
+          );
+        }
         setSnackbar({
           open: true,
           message: 'Company created successfully',
@@ -556,6 +658,179 @@ const CompanyPage: React.FC = () => {
                 inputProps={{ min: 1, max: 31 }}
                 helperText="Day of month (1-31)"
               />
+            </Grid>
+
+            <Grid item xs={12}>
+              <Divider sx={{ my: 2 }}>
+                <Typography variant="h6" color="primary">
+                  Vacation Pay %
+                </Typography>
+              </Divider>
+            </Grid>
+
+            <Grid item xs={12}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={formData.vacation_pay_with_payroll}
+                    onChange={(e) =>
+                      setFormData({ ...formData, vacation_pay_with_payroll: e.target.checked })
+                    }
+                  />
+                }
+                label="Vacation paid with payroll (uncheck for deferred vacation pay / staff choose payout period)"
+              />
+            </Grid>
+
+            <Grid item xs={12}>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                Separate YOS schedules for union and non-union staff. Each employee uses the schedule
+                matching their <strong>Union Member</strong> checkbox.
+              </Typography>
+            </Grid>
+
+            {([false, true] as const).map((isUnion) => {
+              const groupTiers = formData.vacation_percent_tiers
+                .map((t, index) => ({ t, index }))
+                .filter(({ t }) => !!t.union_member === isUnion);
+              const title = isUnion ? 'Union members' : 'Non-union members';
+
+              const replaceGroup = (nextGroup: VacationTier[]) => {
+                const other = formData.vacation_percent_tiers.filter(
+                  (t) => !!t.union_member !== isUnion
+                );
+                setFormData({
+                  ...formData,
+                  vacation_percent_tiers: [
+                    ...other,
+                    ...nextGroup.map((t) => ({ ...t, union_member: isUnion })),
+                  ],
+                });
+              };
+
+              const updateAtGlobal = (globalIndex: number, patch: Partial<VacationTier>) => {
+                const tiers = [...formData.vacation_percent_tiers];
+                tiers[globalIndex] = { ...tiers[globalIndex], ...patch, union_member: isUnion };
+                setFormData({ ...formData, vacation_percent_tiers: tiers });
+              };
+
+              return (
+                <Grid item xs={12} key={isUnion ? 'union' : 'non-union'}>
+                  <Paper variant="outlined" sx={{ p: 1.5, mb: 1 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1, flexWrap: 'wrap' }}>
+                      <Typography variant="subtitle1" fontWeight={600}>
+                        {title}
+                      </Typography>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => replaceGroup(withUnionFlag([...BC_ESA_TIERS], isUnion))}
+                      >
+                        BC ESA (4% / 6%)
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() => replaceGroup(withUnionFlag([...CA_SCHEDULE_TIERS], isUnion))}
+                      >
+                        CA Schedule (4/6/8/10%)
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        onClick={() =>
+                          replaceGroup([
+                            ...groupTiers.map(({ t }) => t),
+                            { min_years: 0, max_years: null, percent: 4, union_member: isUnion },
+                          ])
+                        }
+                      >
+                        Add Tier
+                      </Button>
+                    </Box>
+                    <Table size="small">
+                      <TableHead>
+                        <TableRow>
+                          <TableCell>Min years (inclusive)</TableCell>
+                          <TableCell>Max years (exclusive, blank = open)</TableCell>
+                          <TableCell>Vacation %</TableCell>
+                          <TableCell width={60} />
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {groupTiers.map(({ t: tier, index: idx }) => (
+                          <TableRow key={`${isUnion}-${idx}`}>
+                            <TableCell>
+                              <TextField
+                                type="number"
+                                size="small"
+                                value={tier.min_years}
+                                onChange={(e) =>
+                                  updateAtGlobal(idx, { min_years: Number(e.target.value) })
+                                }
+                                inputProps={{ min: 0, step: 0.5 }}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <TextField
+                                type="number"
+                                size="small"
+                                value={tier.max_years ?? ''}
+                                placeholder="Open"
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  updateAtGlobal(idx, {
+                                    max_years: v === '' ? null : Number(v),
+                                  });
+                                }}
+                                inputProps={{ min: 0, step: 0.5 }}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <TextField
+                                type="number"
+                                size="small"
+                                value={tier.percent}
+                                onChange={(e) =>
+                                  updateAtGlobal(idx, { percent: Number(e.target.value) })
+                                }
+                                inputProps={{ min: 0, step: 0.1 }}
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <IconButton
+                                size="small"
+                                disabled={groupTiers.length <= 1}
+                                onClick={() =>
+                                  replaceGroup(groupTiers.filter(({ index }) => index !== idx).map(({ t }) => t))
+                                }
+                              >
+                                <DeleteIcon fontSize="small" />
+                              </IconButton>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                        {groupTiers.length === 0 && (
+                          <TableRow>
+                            <TableCell colSpan={4}>
+                              <Typography variant="body2" color="text.secondary">
+                                No tiers — BC ESA (4%/6%) will apply until you add a schedule.
+                              </Typography>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                      </TableBody>
+                    </Table>
+                  </Paper>
+                </Grid>
+              );
+            })}
+
+            <Grid item xs={12}>
+              <Typography variant="caption" color="text.secondary" display="block">
+                Max is exclusive. For CA 0–4 / 5–10 / 11–20 / 21+ years of service, use max values{' '}
+                <strong>5, 11, 21</strong> (not 4, 10, 20) so year 10 stays at 6% until the 11-year mark.
+              </Typography>
             </Grid>
           </Grid>
         </DialogContent>

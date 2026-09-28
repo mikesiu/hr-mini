@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   Typography,
@@ -60,7 +60,7 @@ import {
 } from '@mui/icons-material';
 import { useCompanyFilter } from '../hooks/useCompanyFilter';
 import { useSelectedEmployee } from '../contexts/SelectedEmployeeContext';
-import { apiClient, leaveAPI } from '../api/client';
+import { apiClient, leaveAPI, leavePayrollAPI, companyAPI } from '../api/client';
 
 // Types
 interface Employee {
@@ -186,6 +186,9 @@ const LeavePage: React.FC = () => {
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedLeave, setSelectedLeave] = useState<Leave | null>(null);
+  // Keep Days as a string while typing so values like "0.5" are not eaten by parseFloat || 0
+  const [daysInput, setDaysInput] = useState('0');
+  const daysManuallySetRef = useRef(false);
   
   // Upload states
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
@@ -193,6 +196,16 @@ const LeavePage: React.FC = () => {
   const [previewData, setPreviewData] = useState<LeaveUploadPreviewResponse | null>(null);
   const [uploadResult, setUploadResult] = useState<LeaveUploadResponse | null>(null);
   const [uploadLoading, setUploadLoading] = useState(false);
+
+  // Payroll detail import (deferred vacation companies)
+  const [payrollImportOpen, setPayrollImportOpen] = useState(false);
+  const [payrollFile, setPayrollFile] = useState<File | null>(null);
+  const [payrollPreview, setPayrollPreview] = useState<any>(null);
+  const [payrollLoading, setPayrollLoading] = useState(false);
+  const [openingDialogOpen, setOpeningDialogOpen] = useState(false);
+  const [openingAmount, setOpeningAmount] = useState('');
+  const [openingYear, setOpeningYear] = useState(new Date().getFullYear());
+  const [deferredCompany, setDeferredCompany] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   
   // Form state
@@ -268,6 +281,111 @@ const LeavePage: React.FC = () => {
       setLoading(false);
     }
   }, [searchTerm, selectedEmployee, globalSelectedEmployee?.id, selectedCompanyId]);
+
+  useEffect(() => {
+    const checkDeferred = async () => {
+      if (!selectedCompanyId) {
+        setDeferredCompany(false);
+        return;
+      }
+      try {
+        const res = await companyAPI.get(selectedCompanyId);
+        setDeferredCompany(res.data?.vacation_pay_with_payroll === false);
+      } catch {
+        setDeferredCompany(false);
+      }
+    };
+    checkDeferred();
+  }, [selectedCompanyId]);
+
+  const previewPayrollImport = async () => {
+    if (!payrollFile || !selectedCompanyId) return;
+    try {
+      setPayrollLoading(true);
+      setError(null);
+      const res = await leavePayrollAPI.previewPayrollImport(selectedCompanyId, payrollFile);
+      setPayrollPreview(res.data.data);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to preview payroll file');
+      setPayrollPreview(null);
+    } finally {
+      setPayrollLoading(false);
+    }
+  };
+
+  const commitPayrollImport = async () => {
+    if (!payrollFile || !selectedCompanyId) return;
+    try {
+      setPayrollLoading(true);
+      const res = await leavePayrollAPI.commitPayrollImport(selectedCompanyId, payrollFile);
+      setSuccess(`Imported ${res.data.data?.imported || 0} payroll detail rows`);
+      setPayrollImportOpen(false);
+      setPayrollFile(null);
+      setPayrollPreview(null);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to import payroll file');
+    } finally {
+      setPayrollLoading(false);
+    }
+  };
+
+  const loadOpeningBalance = async (
+    employeeId?: string,
+    companyId?: string,
+    year?: number,
+  ) => {
+    const empId = employeeId || selectedEmployee;
+    const coId = companyId || selectedCompanyId;
+    const yr = year ?? openingYear;
+    if (!empId || !coId) {
+      setOpeningAmount('');
+      return;
+    }
+    try {
+      const res = await leavePayrollAPI.listOpenings({
+        employee_id: empId,
+        company_id: coId,
+        year: yr,
+      });
+      const rows = res.data?.data || [];
+      if (rows.length > 0) {
+        setOpeningAmount(String(rows[0].opening_amount ?? ''));
+      } else {
+        setOpeningAmount('');
+      }
+    } catch {
+      setOpeningAmount('');
+    }
+  };
+
+  const openOpeningDialog = async () => {
+    setOpeningYear(selectedYear || new Date().getFullYear());
+    await loadOpeningBalance(
+      selectedEmployee,
+      selectedCompanyId || undefined,
+      selectedYear || new Date().getFullYear(),
+    );
+    setOpeningDialogOpen(true);
+  };
+
+  const saveOpeningBalance = async () => {
+    if (!selectedEmployee || !selectedCompanyId) {
+      setError('Select an employee and company filter first');
+      return;
+    }
+    try {
+      await leavePayrollAPI.upsertOpening({
+        employee_id: selectedEmployee,
+        company_id: selectedCompanyId,
+        year: openingYear,
+        opening_amount: Number(openingAmount) || 0,
+      });
+      setSuccess(`Vacation opening balance saved: $${Number(openingAmount) || 0} for ${openingYear}`);
+      setOpeningDialogOpen(false);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to save opening balance');
+    }
+  };
 
   const loadLeaveBalance = React.useCallback(async (employeeId?: string) => {
     const targetEmployeeId = employeeId || selectedEmployee;
@@ -671,6 +789,31 @@ const LeavePage: React.FC = () => {
   };
 
   // Handle form changes
+  const setDaysRequested = (days: number, markManual = false) => {
+    if (markManual) {
+      daysManuallySetRef.current = true;
+    }
+    setFormData(prev => ({ ...prev, days_requested: days }));
+    setDaysInput(Number.isFinite(days) ? String(days) : '');
+  };
+
+  const handleDaysInputChange = (raw: string) => {
+    // Allow digits and a single decimal point while typing (e.g. "0.", "0.5")
+    if (raw !== '' && !/^\d*\.?\d*$/.test(raw)) {
+      return;
+    }
+    daysManuallySetRef.current = true;
+    setDaysInput(raw);
+    if (raw.trim() === '' || raw === '.') {
+      setFormData(prev => ({ ...prev, days_requested: 0 }));
+      return;
+    }
+    const parsed = parseFloat(raw);
+    if (!Number.isNaN(parsed)) {
+      setFormData(prev => ({ ...prev, days_requested: parsed }));
+    }
+  };
+
   const handleFormChange = (field: keyof LeaveFormData, value: any) => {
     const updatedData = { ...formData, [field]: value };
     setFormData(updatedData);
@@ -683,11 +826,17 @@ const LeavePage: React.FC = () => {
       const endDate = field === 'end_date' ? value : updatedData.end_date;
       
       if (startDate && endDate && startDate <= endDate) {
+        daysManuallySetRef.current = false;
         // Use API to calculate working days (excludes weekends and holidays)
         calculateWorkingDays(startDate, endDate, employeeId).then(days => {
           setFormData(prev => {
-            // Only update if dates haven't changed since calculation started
-            if (prev.start_date === startDate && prev.end_date === endDate) {
+            // Only update if dates haven't changed and user hasn't typed Days manually
+            if (
+              prev.start_date === startDate &&
+              prev.end_date === endDate &&
+              !daysManuallySetRef.current
+            ) {
+              setDaysInput(String(days));
               return { ...prev, days_requested: days };
             }
             return prev;
@@ -696,7 +845,9 @@ const LeavePage: React.FC = () => {
           console.error('Failed to calculate working days:', err);
           // Fallback to simple calculation
           const fallbackDays = calculateDays(startDate, endDate);
-          setFormData(prev => ({ ...prev, days_requested: fallbackDays }));
+          if (!daysManuallySetRef.current) {
+            setDaysRequested(fallbackDays);
+          }
         });
       }
     }
@@ -704,13 +855,23 @@ const LeavePage: React.FC = () => {
 
   // Handle add leave
   const handleAddLeave = async () => {
-    if (!selectedEmployee) return;
+    if (!selectedEmployee) {
+      setError('Please select an employee before adding leave');
+      return;
+    }
+
+    const daysRequested = parseFloat(daysInput);
+    if (Number.isNaN(daysRequested) || daysRequested <= 0) {
+      setError('Days must be greater than 0 (e.g. 0.5 for a half day)');
+      return;
+    }
     
     try {
       setLoading(true);
       await apiClient.post('/leaves', {
         employee_id: selectedEmployee,
         ...formData,
+        days_requested: daysRequested,
       });
       
       setSuccess('Leave request created successfully');
@@ -728,10 +889,19 @@ const LeavePage: React.FC = () => {
   // Handle edit leave
   const handleEditLeave = async () => {
     if (!selectedLeave) return;
+
+    const daysRequested = parseFloat(daysInput);
+    if (Number.isNaN(daysRequested) || daysRequested <= 0) {
+      setError('Days must be greater than 0 (e.g. 0.5 for a half day)');
+      return;
+    }
     
     try {
       setLoading(true);
-      await apiClient.put(`/leaves/${selectedLeave.id}`, formData);
+      await apiClient.put(`/leaves/${selectedLeave.id}`, {
+        ...formData,
+        days_requested: daysRequested,
+      });
       
       setSuccess('Leave request updated successfully');
       setEditDialogOpen(false);
@@ -774,6 +944,8 @@ const LeavePage: React.FC = () => {
       reason: '',
       status: 'Active',
     });
+    setDaysInput('0');
+    daysManuallySetRef.current = false;
     setSelectedLeave(null);
   };
 
@@ -788,6 +960,8 @@ const LeavePage: React.FC = () => {
       reason: leave.reason || '',
       status: leave.status,
     });
+    setDaysInput(String(leave.days_requested));
+    daysManuallySetRef.current = true;
     setEditDialogOpen(true);
   };
 
@@ -914,6 +1088,26 @@ const LeavePage: React.FC = () => {
         Leave Dashboard
       </Typography>
         <Box display="flex" gap={2}>
+          {deferredCompany && (
+            <>
+              <Button
+                variant="outlined"
+                onClick={() => setPayrollImportOpen(true)}
+                size="large"
+                disabled={!selectedCompanyId}
+              >
+                Import Payroll
+              </Button>
+              <Button
+                variant="outlined"
+                onClick={() => openOpeningDialog()}
+                size="large"
+                disabled={!selectedEmployee || !selectedCompanyId}
+              >
+                Vacation $ Opening
+              </Button>
+            </>
+          )}
           <Button
             variant="outlined"
             startIcon={<UploadIcon />}
@@ -925,7 +1119,10 @@ const LeavePage: React.FC = () => {
           <Button
             variant="contained"
             startIcon={<Add />}
-            onClick={() => setAddDialogOpen(true)}
+            onClick={() => {
+              resetForm();
+              setAddDialogOpen(true);
+            }}
             size="large"
           >
             Add Leave
@@ -1567,10 +1764,12 @@ const LeavePage: React.FC = () => {
               <TextField
                 fullWidth
                 label="Days"
-                type="number"
-                value={formData.days_requested}
-                onChange={(e) => handleFormChange('days_requested', parseFloat(e.target.value) || 0)}
-                inputProps={{ min: 0, step: 0.5 }}
+                type="text"
+                inputMode="decimal"
+                value={daysInput}
+                onChange={(e) => handleDaysInputChange(e.target.value)}
+                inputProps={{ inputMode: 'decimal', pattern: '[0-9]*[.]?[0-9]*' }}
+                helperText="Use 0.5 for a half day"
               />
             </Grid>
             <Grid item xs={12}>
@@ -1653,10 +1852,12 @@ const LeavePage: React.FC = () => {
               <TextField
                 fullWidth
                 label="Days"
-                type="number"
-                value={formData.days_requested}
-                onChange={(e) => handleFormChange('days_requested', parseFloat(e.target.value) || 0)}
-                inputProps={{ min: 0, step: 0.5 }}
+                type="text"
+                inputMode="decimal"
+                value={daysInput}
+                onChange={(e) => handleDaysInputChange(e.target.value)}
+                inputProps={{ inputMode: 'decimal', pattern: '[0-9]*[.]?[0-9]*' }}
+                helperText="Use 0.5 for a half day"
               />
             </Grid>
             <Grid item xs={12}>
@@ -1918,6 +2119,134 @@ const LeavePage: React.FC = () => {
               {uploadLoading ? <CircularProgress size={20} /> : 'Import'}
             </Button>
           )}
+        </DialogActions>
+      </Dialog>
+
+      {/* Payroll EmplDetl import */}
+      <Dialog open={payrollImportOpen} onClose={() => setPayrollImportOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>Import Payroll Details (EmplDetl)</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Upload an EmplDetl Excel export. Same Import button supports both:
+            <br />• <strong>All staff after one payroll</strong> (e.g. EmplDetl_QWP.xlsx) — many employees, one cheque each
+            <br />• <strong>One staff, many pay periods</strong> (e.g. EmplDetl_Harjit.xlsx) — one employee, multiple cheques / YTD
+          </Typography>
+          <Button variant="outlined" component="label" sx={{ mb: 2 }}>
+            Choose Excel file
+            <input
+              type="file"
+              hidden
+              accept=".xlsx,.xls"
+              onChange={(e) => {
+                setPayrollFile(e.target.files?.[0] || null);
+                setPayrollPreview(null);
+              }}
+            />
+          </Button>
+          {payrollFile && (
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              Selected: {payrollFile.name}
+            </Typography>
+          )}
+                    {payrollPreview && (
+            <Box sx={{ mt: 2 }}>
+              <Alert severity={payrollPreview.can_import ? 'success' : 'warning'} sx={{ mb: 1 }}>
+                {payrollPreview.report_kind === 'single_employee_multi_pay'
+                  ? 'Detected: one employee, multiple pay lines. '
+                  : payrollPreview.report_kind === 'all_staff_single_pay'
+                    ? 'Detected: all-staff single payroll. '
+                    : ''}
+                Matched {payrollPreview.summary?.matched}/{payrollPreview.summary?.total}. Unmatched:{' '}
+                {payrollPreview.summary?.unmatched}, Ambiguous: {payrollPreview.summary?.ambiguous}
+              </Alert>
+              <TableContainer component={Paper} sx={{ maxHeight: 280 }}>
+                <Table size="small" stickyHeader>
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Name</TableCell>
+                      <TableCell>Match</TableCell>
+                      <TableCell>Employee</TableCell>
+                      <TableCell>Payroll Date</TableCell>
+                      <TableCell>Cheque</TableCell>
+                      <TableCell>Gross</TableCell>
+                      <TableCell>Benefits</TableCell>
+                      <TableCell>Vac Paid</TableCell>
+                      <TableCell>Vac Earned</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {(payrollPreview.rows || []).slice(0, 50).map((r: any, i: number) => (
+                      <TableRow key={i}>
+                        <TableCell>{r.employee_name}</TableCell>
+                        <TableCell>{r.match_status}</TableCell>
+                        <TableCell>{r.matched_name || r.employee_id || '—'}</TableCell>
+                        <TableCell>{r.pay_date || '—'}</TableCell>
+                        <TableCell>{r.cheque_no || '—'}</TableCell>
+                        <TableCell>{r.gross}</TableCell>
+                        <TableCell>{r.benefits ?? 0}</TableCell>
+                        <TableCell>{r.vacation_paid}</TableCell>
+                        <TableCell>{r.vacation_earned}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPayrollImportOpen(false)}>Cancel</Button>
+          <Button onClick={previewPayrollImport} disabled={!payrollFile || payrollLoading}>
+            Preview
+          </Button>
+          <Button
+            variant="contained"
+            onClick={commitPayrollImport}
+            disabled={!payrollPreview?.can_import || payrollLoading}
+          >
+            {payrollLoading ? <CircularProgress size={20} /> : 'Import'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Vacation dollar opening */}
+      <Dialog open={openingDialogOpen} onClose={() => setOpeningDialogOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Vacation $ Opening Balance</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Brought-forward vacation dollar balance as of Jan 1 for the selected employee/company.
+          </Typography>
+          <TextField
+            fullWidth
+            label="Year"
+            type="number"
+            value={openingYear}
+            onChange={async (e) => {
+              const yr = Number(e.target.value);
+              setOpeningYear(yr);
+              await loadOpeningBalance(selectedEmployee, selectedCompanyId || undefined, yr);
+            }}
+            sx={{ mb: 2 }}
+          />
+          <TextField
+            fullWidth
+            label="Opening amount ($)"
+            type="number"
+            value={openingAmount}
+            onChange={(e) => setOpeningAmount(e.target.value)}
+            inputProps={{ step: 0.01 }}
+            helperText={
+              openingAmount !== ''
+                ? `Current saved / entered value for ${openingYear}`
+                : `No opening saved yet for ${openingYear}`
+            }
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpeningDialogOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={saveOpeningBalance}>
+            Save
+          </Button>
         </DialogActions>
       </Dialog>
 

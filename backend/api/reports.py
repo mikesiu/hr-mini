@@ -16,7 +16,8 @@ from schemas_reports import (
     ExpenseReportFilters, WorkPermitReportFilters, ReportFilterBase,
     EmployeeReportResponse, EmploymentReportResponse, LeaveReportResponse,
     LeaveBalanceReportResponse, LeaveTakenReportResponse, SalaryReportResponse, ExpenseReportResponse,
-    WorkPermitReportResponse, EmployeePersonalDetailsReportResponse, EmployeeBasicProfileReportResponse, ExpenseReimbursementReportResponse, ReportType,
+    WorkPermitReportResponse, EmployeePersonalDetailsReportResponse, EmployeeBasicProfileReportResponse, ExpenseReimbursementReportResponse,
+    VacationPayLedgerReportResponse, ReportType,
     SortField, SortDirection, GroupByField
 )
 
@@ -250,6 +251,38 @@ async def get_leave_taken_report(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating leave taken report: {str(e)}")
+
+@router.get("/vacation-pay-ledger", response_model=VacationPayLedgerReportResponse)
+async def get_vacation_pay_ledger_report(
+    start_date: Optional[date] = Query(None, description="Use year of this date (default: Jan 1 current year)"),
+    end_date: Optional[date] = Query(None, description="Alternate year source"),
+    company_id: Optional[str] = Query(None, description="Company ID (required)"),
+    employee_status: Optional[str] = Query("Active & Probation", description="Filter by employee status"),
+    employee_id: Optional[str] = Query(None, description="Filter by specific employee ID"),
+    employee_ids: Optional[str] = Query(None, description="Comma-separated employee IDs (multi-select)"),
+    search_term: Optional[str] = Query(None, description="Search term for employee name"),
+    current_user: dict = Depends(require_permission("report:view")),
+):
+    """Vacation pay ledger for deferred vacation-pay companies (calendar year)."""
+    try:
+        if not company_id:
+            raise HTTPException(status_code=400, detail="company_id is required")
+        year = (end_date or start_date or date.today()).year
+        filters = ReportFilterBase(
+            start_date=date(year, 1, 1),
+            end_date=date(year, 12, 31),
+            company_id=company_id,
+            employee_status=employee_status,
+            employee_id=employee_id,
+            employee_ids=employee_ids,
+            search_term=search_term,
+        )
+        data, summary = report_service.generate_vacation_pay_ledger_report(filters)
+        return VacationPayLedgerReportResponse(success=True, data=data, summary=summary)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating vacation pay ledger: {str(e)}")
 
 @router.get("/salary-analysis", response_model=SalaryReportResponse)
 async def get_salary_analysis_report(
@@ -530,6 +563,7 @@ async def export_report(
     department: Optional[str] = Query(None, description="Filter by department"),
     employee_status: Optional[str] = Query("Active & Probation", description="Filter by employee status"),
     employee_id: Optional[str] = Query(None, description="Filter by specific employee ID"),
+    employee_ids: Optional[str] = Query(None, description="Comma-separated employee IDs (multi-select)"),
     search_term: Optional[str] = Query(None, description="Search term"),
     
     current_user: dict = Depends(require_permission("report:export"))
@@ -548,6 +582,7 @@ async def export_report(
             department=department,
             employee_status=employee_status,
             employee_id=employee_id,
+            employee_ids=employee_ids,
             search_term=search_term
         )
         
@@ -562,6 +597,8 @@ async def export_report(
             data, summary = report_service.generate_leave_balance_report(filters)
         elif report_type == ReportType.LEAVE_TAKEN.value:
             data, summary = report_service.generate_leave_taken_report(filters)
+        elif report_type == ReportType.VACATION_PAY_LEDGER.value:
+            data, summary = report_service.generate_vacation_pay_ledger_report(filters)
         elif report_type == ReportType.SALARY_ANALYSIS.value:
             data, summary = report_service.generate_salary_analysis_report(
                 SalaryReportFilters(**filters.dict())
@@ -657,6 +694,11 @@ async def get_available_report_types(
                 "type": ReportType.EXPENSE_REIMBURSEMENT.value,
                 "name": "Expense Reimbursement",
                 "description": "Detailed report of all expense claims and reimbursements"
+            },
+            {
+                "type": ReportType.VACATION_PAY_LEDGER.value,
+                "name": "Vacation Pay Ledger",
+                "description": "Pay-period vacation/sick pay ledger for companies with deferred vacation pay"
             }
         ]
         
@@ -722,6 +764,16 @@ async def get_available_filters(
                 "specific_filters": [
                     {"name": "start_date", "type": "date", "label": "Start Date", "description": "Filter leave requests from this date"},
                     {"name": "end_date", "type": "date", "label": "End Date", "description": "Filter leave requests until this date"}
+                ]
+            },
+            ReportType.VACATION_PAY_LEDGER.value: {
+                "common_filters": [
+                    {"name": "company_id", "type": "select", "label": "Company", "description": "Required — deferred vacation company"},
+                    {"name": "employee_status", "type": "select", "label": "Status", "description": "Employee status", "options": ["Active", "On Leave", "Terminated", "Probation", "Active & Probation", "All"]},
+                    {"name": "employee_ids", "type": "multiselect", "label": "Employees", "description": "Select one or more employees (leave empty for all)"}
+                ],
+                "specific_filters": [
+                    {"name": "start_date", "type": "date", "label": "Year (any date in year)", "description": "Calendar year for the ledger (uses year of this date)"}
                 ]
             },
             ReportType.SALARY_ANALYSIS.value: {

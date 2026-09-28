@@ -1,4 +1,5 @@
-from sqlalchemy import Column, String, Text, Date, Integer
+from sqlalchemy import Column, String, Text, Date, Integer, Boolean
+from sqlalchemy.orm import relationship
 from models.base import Base
 
 class Company(Base):
@@ -22,3 +23,12 @@ class Company(Base):
     payroll_frequency = Column(String(20))                 # Options: "bi-weekly", "bi-monthly", "monthly"
     cra_due_dates = Column(String(50))                     # Comma-separated list of day numbers (e.g., "15,30")
     union_due_date = Column(Integer)                       # Single day of month (1-31)
+    # True = vacation paid on each cheque with payroll; False = deferred (staff choose payout period)
+    vacation_pay_with_payroll = Column(Boolean, default=True, nullable=False)
+
+    vacation_percent_tiers = relationship(
+        "models.vacation_percent_tier.VacationPercentTier",
+        back_populates="company",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )

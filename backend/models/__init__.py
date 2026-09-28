@@ -18,3 +18,6 @@ from .work_schedule import WorkSchedule
 from .employee_schedule import EmployeeSchedule
 from .attendance import Attendance
 from .attendance_period_override import AttendancePeriodOverride
+from .vacation_percent_tier import VacationPercentTier
+from .vacation_dollar_opening import VacationDollarOpening
+from .payroll_employee_period import PayrollEmployeePeriod

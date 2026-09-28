@@ -27,7 +27,7 @@ export type GroupByField =
 
 export interface ReportFilter {
   name: string;
-  type: 'text' | 'select' | 'date' | 'number' | 'boolean';
+  type: 'text' | 'select' | 'date' | 'number' | 'boolean' | 'multiselect';
   label: string;
   description: string;
   options?: string[];
@@ -242,6 +242,8 @@ export interface ReportFilters {
   department?: string;
   employee_status?: string;
   employee_id?: string;
+  /** Comma-separated employee IDs for multi-select filters */
+  employee_ids?: string;
   search_term?: string;
   include_inactive?: boolean;
   position?: string;

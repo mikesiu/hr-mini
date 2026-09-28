@@ -26,6 +26,45 @@ from repos.company_repo import get_company_by_id
 router = APIRouter()
 
 
+def _employee_to_response(emp, company_id=None, company_short_form=None) -> EmployeeResponse:
+    return EmployeeResponse(
+        id=emp.id,
+        first_name=emp.first_name,
+        last_name=emp.last_name,
+        other_name=emp.other_name,
+        full_name=emp.full_name,
+        email=emp.email,
+        phone=emp.phone,
+        street=emp.street,
+        city=emp.city,
+        province=emp.province,
+        postal_code=emp.postal_code,
+        dob=emp.dob.isoformat() if emp.dob else None,
+        sin=emp.sin,
+        drivers_license=emp.drivers_license,
+        hire_date=emp.hire_date.isoformat() if emp.hire_date else None,
+        probation_end_date=emp.probation_end_date.isoformat() if emp.probation_end_date else None,
+        seniority_start_date=emp.seniority_start_date.isoformat() if emp.seniority_start_date else None,
+        status=emp.status,
+        remarks=emp.remarks,
+        paystub=emp.paystub,
+        union_member=emp.union_member,
+        vacation_percent=float(emp.vacation_percent) if getattr(emp, "vacation_percent", None) is not None else None,
+        vacation_percent_override=bool(getattr(emp, "vacation_percent_override", False)),
+        use_mailing_address=emp.use_mailing_address,
+        mailing_street=emp.mailing_street,
+        mailing_city=emp.mailing_city,
+        mailing_province=emp.mailing_province,
+        mailing_postal_code=emp.mailing_postal_code,
+        emergency_contact_name=emp.emergency_contact_name,
+        emergency_contact_phone=emp.emergency_contact_phone,
+        company_id=company_id,
+        company_short_form=company_short_form,
+        created_at=emp.created_at.isoformat() if emp.created_at else None,
+        updated_at=emp.updated_at.isoformat() if emp.updated_at else None,
+    )
+
+
 @router.get("/list", response_model=EmployeeListResponse)
 async def list_employees(
     q: Optional[str] = Query(None, description="Search term for employee name or ID"),
@@ -59,40 +98,7 @@ async def list_employees(
             if company:
                 company_short_form = company.id
         
-        employee_list.append(EmployeeResponse(
-            id=emp.id,
-            first_name=emp.first_name,
-            last_name=emp.last_name,
-            other_name=emp.other_name,
-            full_name=emp.full_name,
-            email=emp.email,
-            phone=emp.phone,
-            street=emp.street,
-            city=emp.city,
-            province=emp.province,
-            postal_code=emp.postal_code,
-            dob=emp.dob.isoformat() if emp.dob else None,
-            sin=emp.sin,
-            drivers_license=emp.drivers_license,
-            hire_date=emp.hire_date.isoformat() if emp.hire_date else None,
-            probation_end_date=emp.probation_end_date.isoformat() if emp.probation_end_date else None,
-            seniority_start_date=emp.seniority_start_date.isoformat() if emp.seniority_start_date else None,
-            status=emp.status,
-            remarks=emp.remarks,
-            paystub=emp.paystub,
-            union_member=emp.union_member,
-            use_mailing_address=emp.use_mailing_address,
-            mailing_street=emp.mailing_street,
-            mailing_city=emp.mailing_city,
-            mailing_province=emp.mailing_province,
-            mailing_postal_code=emp.mailing_postal_code,
-            emergency_contact_name=emp.emergency_contact_name,
-            emergency_contact_phone=emp.emergency_contact_phone,
-            company_id=company_id,
-            company_short_form=company_short_form,
-            created_at=emp.created_at.isoformat() if emp.created_at else None,
-            updated_at=emp.updated_at.isoformat() if emp.updated_at else None
-        ))
+        employee_list.append(_employee_to_response(emp, company_id, company_short_form))
     
     return {"success": True, "data": employee_list}
 
@@ -118,41 +124,7 @@ async def get_employee_by_id(
         if company:
             company_short_form = company.id
     
-    # Convert SQLAlchemy model to Pydantic model
-    return EmployeeResponse(
-        id=employee.id,
-        first_name=employee.first_name,
-        last_name=employee.last_name,
-        other_name=employee.other_name,
-        full_name=employee.full_name,
-        email=employee.email,
-        phone=employee.phone,
-        street=employee.street,
-        city=employee.city,
-        province=employee.province,
-        postal_code=employee.postal_code,
-        dob=employee.dob.isoformat() if employee.dob else None,
-        sin=employee.sin,
-        drivers_license=employee.drivers_license,
-        hire_date=employee.hire_date.isoformat() if employee.hire_date else None,
-        probation_end_date=employee.probation_end_date.isoformat() if employee.probation_end_date else None,
-        seniority_start_date=employee.seniority_start_date.isoformat() if employee.seniority_start_date else None,
-            status=employee.status,
-            remarks=employee.remarks,
-            paystub=employee.paystub,
-            union_member=employee.union_member,
-            use_mailing_address=employee.use_mailing_address,
-        mailing_street=employee.mailing_street,
-        mailing_city=employee.mailing_city,
-        mailing_province=employee.mailing_province,
-        mailing_postal_code=employee.mailing_postal_code,
-        emergency_contact_name=employee.emergency_contact_name,
-        emergency_contact_phone=employee.emergency_contact_phone,
-        company_id=company_id,
-        company_short_form=company_short_form,
-        created_at=employee.created_at.isoformat() if employee.created_at else None,
-        updated_at=employee.updated_at.isoformat() if employee.updated_at else None
-    )
+    return _employee_to_response(employee, company_id, company_short_form)
 
 @router.post("/", response_model=EmployeeResponse)
 async def create_new_employee(
@@ -235,40 +207,36 @@ async def update_employee_by_id(
         updated_employee = update_employee(employee_id, **update_data)
         if not updated_employee:
             raise HTTPException(status_code=400, detail="Failed to update employee")
-        
-        # Convert SQLAlchemy model to Pydantic model
-        return EmployeeResponse(
-            id=updated_employee.id,
-            first_name=updated_employee.first_name,
-            last_name=updated_employee.last_name,
-            other_name=updated_employee.other_name,
-            full_name=updated_employee.full_name,
-            email=updated_employee.email,
-            phone=updated_employee.phone,
-            street=updated_employee.street,
-            city=updated_employee.city,
-            province=updated_employee.province,
-            postal_code=updated_employee.postal_code,
-            dob=updated_employee.dob.isoformat() if updated_employee.dob else None,
-            sin=updated_employee.sin,
-            drivers_license=updated_employee.drivers_license,
-            hire_date=updated_employee.hire_date.isoformat() if updated_employee.hire_date else None,
-            probation_end_date=updated_employee.probation_end_date.isoformat() if updated_employee.probation_end_date else None,
-            seniority_start_date=updated_employee.seniority_start_date.isoformat() if updated_employee.seniority_start_date else None,
-            status=updated_employee.status,
-            remarks=updated_employee.remarks,
-            paystub=updated_employee.paystub,
-            union_member=updated_employee.union_member,
-            use_mailing_address=updated_employee.use_mailing_address,
-            mailing_street=updated_employee.mailing_street,
-            mailing_city=updated_employee.mailing_city,
-            mailing_province=updated_employee.mailing_province,
-            mailing_postal_code=updated_employee.mailing_postal_code,
-            emergency_contact_name=updated_employee.emergency_contact_name,
-            emergency_contact_phone=updated_employee.emergency_contact_phone,
-            created_at=updated_employee.created_at.isoformat() if updated_employee.created_at else None,
-            updated_at=updated_employee.updated_at.isoformat() if updated_employee.updated_at else None
-        )
+
+        # Sync vacation % from company tiers unless override is set
+        try:
+            from services.vacation_percent_service import sync_employee_vacation_percent
+            current_employment = get_current_employment(employee_id)
+            company_id = current_employment.company_id if current_employment else None
+            if update_data.get("vacation_percent_override"):
+                # Keep explicit override percent; do not overwrite
+                pass
+            elif update_data.get("vacation_percent_override") is False or any(
+                k in update_data
+                for k in (
+                    "hire_date",
+                    "seniority_start_date",
+                    "vacation_percent_override",
+                    "union_member",
+                )
+            ):
+                sync_employee_vacation_percent(employee_id, company_id)
+                updated_employee = get_employee(employee_id) or updated_employee
+            elif not getattr(updated_employee, "vacation_percent_override", False) and updated_employee.vacation_percent is None:
+                sync_employee_vacation_percent(employee_id, company_id)
+                updated_employee = get_employee(employee_id) or updated_employee
+        except Exception as sync_err:
+            print(f"Vacation percent sync skipped: {sync_err}")
+
+        current_employment = get_current_employment(employee_id)
+        company_id = current_employment.company_id if current_employment else None
+        company_short = company_id
+        return _employee_to_response(updated_employee, company_id, company_short)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

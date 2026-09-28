@@ -1,5 +1,6 @@
 # app/models/work_permit.py
 from sqlalchemy import Column, String, Date, Integer, ForeignKey
+from sqlalchemy.orm import relationship
 from models.base import Base
 
 class WorkPermit(Base):
@@ -9,3 +10,6 @@ class WorkPermit(Base):
     employee_id = Column(String(50), ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
     permit_type = Column(String(100), nullable=False)  # e.g., "Open Work Permit", "Closed Work Permit", "Student Work Permit"
     expiry_date = Column(Date, nullable=False)
+
+    # noload: avoid DetachedInstanceError after session closes unless joinedload() is used
+    employee = relationship("models.employee.Employee", lazy="noload")

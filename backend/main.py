@@ -12,7 +12,7 @@ import time
 sys.path.append(str(Path(__file__).parent))
 
 # Import API routes
-from api import auth, employees, employment, leaves, salary, work_permits, expenses, companies, users, audit, reports, dashboard, holidays, termination, work_schedules, attendance
+from api import auth, employees, employment, leaves, salary, work_permits, expenses, companies, users, audit, reports, dashboard, holidays, termination, work_schedules, attendance, vacation_payroll
 
 # Create FastAPI app
 app = FastAPI(
@@ -88,6 +88,7 @@ print("Employees router registered with routes:", [route.path for route in emplo
 app.include_router(employment.router, prefix="/api/employment", tags=["Employment"])
 app.include_router(leaves.router, prefix="/api/leaves", tags=["Leaves"])
 print("Leaves router registered with routes:", [route.path for route in leaves.router.routes])
+app.include_router(vacation_payroll.router, prefix="/api/leave-payroll", tags=["Leave Payroll"])
 app.include_router(salary.router, prefix="/api/salary", tags=["Salary"])
 app.include_router(work_permits.router, prefix="/api/work-permits", tags=["Work Permits"])
 app.include_router(expenses.router, prefix="/api/expenses", tags=["Expenses"])

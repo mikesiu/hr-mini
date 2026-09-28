@@ -1,5 +1,5 @@
 # app/models/employee.py
-from sqlalchemy import Column, String, Text, Date, DateTime, Boolean
+from sqlalchemy import Column, String, Text, Date, DateTime, Boolean, Numeric
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from models.base import Base
@@ -29,6 +29,9 @@ class Employee(Base):
     remarks = Column(Text)      # Additional notes/remarks about the employee
     paystub = Column(Boolean, default=False)  # Yes/No field for paystub availability
     union_member = Column(Boolean, default=False)  # Union member checkbox
+    # Vacation pay percent (e.g. 4.0 = 4%); auto from company tiers unless override
+    vacation_percent = Column(Numeric(6, 3), nullable=True)
+    vacation_percent_override = Column(Boolean, default=False, nullable=False)
     
     # Mailing address fields
     use_mailing_address = Column(Boolean, default=False)  # Whether to use separate mailing address

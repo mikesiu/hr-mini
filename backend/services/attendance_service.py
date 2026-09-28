@@ -25,7 +25,7 @@ def calculate_hours_worked(
         schedule_start: Scheduled start time for this day
         schedule_end: Scheduled end time for this day
         work_date: Date of work
-        is_driver: Whether employee is a driver (affects OT calculation)
+        is_driver: Whether employee is a driver (early check-in before schedule start counts as OT)
         weekday_schedule_start: Optional weekday schedule start time (e.g., Monday's start time)
                               Used for weekend OT calculation when schedule_start is None
         count_all_ot: Whether to count OT even if less than 30 minutes
@@ -82,9 +82,6 @@ def calculate_hours_worked(
     scheduled_seconds = (schedule_end_dt - schedule_start_dt).total_seconds()
     scheduled_hours = scheduled_seconds / 3600.0
     
-    # For OT calculation: Only count time worked AFTER scheduled end time
-    # Early check-in (before scheduled start) does NOT count as OT
-    
     # Determine effective start time (use scheduled start if check-in is earlier)
     effective_start_dt = max(check_in_dt, schedule_start_dt)
     
@@ -93,11 +90,12 @@ def calculate_hours_worked(
     regular_seconds = (regular_end_dt - effective_start_dt).total_seconds()
     regular_hours = max(0.0, regular_seconds / 3600.0)  # Ensure non-negative
     
-    # Calculate OT hours: only time worked AFTER scheduled end time
+    # OT: after scheduled end for all employees; before scheduled start for drivers only
     ot_hours = 0.0
+    if is_driver and check_in_dt < schedule_start_dt:
+        ot_hours += (schedule_start_dt - check_in_dt).total_seconds() / 3600.0
     if check_out_dt > schedule_end_dt:
-        ot_seconds = (check_out_dt - schedule_end_dt).total_seconds()
-        ot_hours = ot_seconds / 3600.0
+        ot_hours += (check_out_dt - schedule_end_dt).total_seconds() / 3600.0
     
     # Apply OT rules (minimum thresholds and rounding) for weekdays
     # (Weekends are handled earlier in the function with early return)
@@ -112,7 +110,7 @@ def determine_ot_hours(ot_hours: float, is_driver: bool, count_all_ot: bool = Fa
     
     Args:
         ot_hours: Raw OT hours calculated
-        is_driver: Whether employee is a driver (kept for compatibility, but not used)
+        is_driver: Whether employee is a driver (unused; early OT is computed before this call)
         count_all_ot: Whether to count OT even if less than 30 minutes
         
     Returns:

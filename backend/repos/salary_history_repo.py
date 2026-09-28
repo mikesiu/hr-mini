@@ -3,7 +3,7 @@ Salary History Repository - Data access layer for salary history management
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
 
@@ -83,7 +83,8 @@ def create_salary_record(
             ).first()
             
             if current_salary:
-                current_salary.end_date = effective_date
+                # Close previous salary the day before the new one starts
+                current_salary.end_date = effective_date - timedelta(days=1)
         
         # Create new salary record
         salary_record = SalaryHistory(

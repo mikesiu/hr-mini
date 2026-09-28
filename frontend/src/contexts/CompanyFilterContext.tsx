@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
 import { companyAPI } from '../api/client';
 import { useAuth } from './AuthContext';
 
@@ -28,9 +28,18 @@ export const CompanyFilterProvider: React.FC<CompanyFilterProviderProps> = ({ ch
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const MAX_RETRY_ATTEMPTS = 5;
 
   useEffect(() => {
-    const fetchCompanies = async () => {
+    const clearRetryTimeout = () => {
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = null;
+      }
+    };
+
+    const fetchCompanies = async (attempt: number = 0) => {
       // Wait for auth to finish loading
       if (authLoading) {
         console.log('CompanyFilterContext: Waiting for auth to load...');
@@ -40,6 +49,7 @@ export const CompanyFilterProvider: React.FC<CompanyFilterProviderProps> = ({ ch
       // Check if user is authenticated
       if (!user) {
         console.warn('CompanyFilterContext: No authenticated user, skipping company fetch');
+        clearRetryTimeout();
         setLoading(false);
         setCompanies([]);
         return;
@@ -49,6 +59,7 @@ export const CompanyFilterProvider: React.FC<CompanyFilterProviderProps> = ({ ch
       const token = localStorage.getItem('access_token');
       if (!token) {
         console.warn('CompanyFilterContext: No access token found in localStorage, skipping company fetch');
+        clearRetryTimeout();
         setLoading(false);
         setCompanies([]);
         return;
@@ -89,6 +100,7 @@ export const CompanyFilterProvider: React.FC<CompanyFilterProviderProps> = ({ ch
         companyList = companyList.filter(c => c && c.id && c.legal_name);
         
         console.log('CompanyFilterContext: Setting companies:', companyList.length, 'companies', companyList);
+        clearRetryTimeout();
         setCompanies(companyList);
         
         if (companyList.length === 0 && response.status === 200) {
@@ -102,21 +114,35 @@ export const CompanyFilterProvider: React.FC<CompanyFilterProviderProps> = ({ ch
           data: error.response?.data,
           fullError: error
         });
+
+        const status = error.response?.status;
+        const isTransientError =
+          !status ||
+          status >= 500 ||
+          error.code === 'ECONNABORTED' ||
+          error.code === 'ECONNRESET' ||
+          error.code === 'ERR_NETWORK' ||
+          error.message?.includes('ConnectionResetError');
+
+        if (isTransientError && attempt < MAX_RETRY_ATTEMPTS) {
+          const nextAttempt = attempt + 1;
+          const delayMs = Math.min(1000 * (2 ** attempt), 10000);
+          console.warn(`CompanyFilterContext: Transient error. Retrying in ${delayMs}ms (attempt ${nextAttempt}/${MAX_RETRY_ATTEMPTS})`);
+          clearRetryTimeout();
+          retryTimeoutRef.current = setTimeout(() => {
+            fetchCompanies(nextAttempt);
+          }, delayMs);
+          return;
+        }
         
-        // Handle 403 Forbidden - may be permission issue or expired token
-        if (error.response?.status === 403) {
+        // Handle 403 Forbidden - may be permission issue
+        if (status === 403) {
           console.warn('Access forbidden (403) when fetching companies. This may indicate a permission issue.');
           setCompanies([]);
-        } else if (error.response?.status === 401) {
+        } else if (status === 401) {
           // 401 should be handled by axios interceptor, but just in case
           console.warn('Unauthorized (401) when fetching companies.');
           setCompanies([]);
-        } else if (error.code === 'ECONNRESET' || error.message?.includes('ConnectionResetError')) {
-          console.warn('Connection lost while fetching companies. Retrying in 3 seconds...');
-          // Retry after 3 seconds
-          setTimeout(() => {
-            fetchCompanies();
-          }, 3000);
         } else {
           setCompanies([]);
         }
@@ -125,7 +151,12 @@ export const CompanyFilterProvider: React.FC<CompanyFilterProviderProps> = ({ ch
       }
     };
 
-    fetchCompanies();
+    clearRetryTimeout();
+    fetchCompanies(0);
+
+    return () => {
+      clearRetryTimeout();
+    };
   }, [user, authLoading]);
 
   const selectedCompany = companies.find(company => company.id === selectedCompanyId) || null;

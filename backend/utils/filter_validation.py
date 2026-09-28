@@ -16,6 +16,7 @@ class ReportType(Enum):
     WORK_PERMIT_STATUS = "work_permit_status"
     EMPLOYEE_PERSONAL_DETAILS = "employee_personal_details"
     EMPLOYEE_BASIC_PROFILE = "employee_basic_profile"
+    VACATION_PAY_LEDGER = "vacation_pay_ledger"
 
 class FilterValidationResult:
     def __init__(self, is_valid: bool, errors: List[str], warnings: List[str], applicable_filters: List[str]):
@@ -29,16 +30,19 @@ FILTER_APPLICABILITY = {
     # Common filters (apply to all reports)
     "company_id": [ReportType.EMPLOYEE_DIRECTORY, ReportType.EMPLOYMENT_HISTORY, ReportType.LEAVE_BALANCE, 
                    ReportType.LEAVE_TAKEN, ReportType.SALARY_ANALYSIS, ReportType.WORK_PERMIT_STATUS, 
-                   ReportType.EMPLOYEE_PERSONAL_DETAILS, ReportType.EMPLOYEE_BASIC_PROFILE],
+                   ReportType.EMPLOYEE_PERSONAL_DETAILS, ReportType.EMPLOYEE_BASIC_PROFILE,
+                   ReportType.VACATION_PAY_LEDGER],
     "department": [ReportType.EMPLOYEE_DIRECTORY, ReportType.EMPLOYMENT_HISTORY, ReportType.LEAVE_BALANCE, 
                    ReportType.LEAVE_TAKEN, ReportType.SALARY_ANALYSIS, ReportType.WORK_PERMIT_STATUS, 
                    ReportType.EMPLOYEE_PERSONAL_DETAILS, ReportType.EMPLOYEE_BASIC_PROFILE],
     "employee_status": [ReportType.EMPLOYEE_DIRECTORY, ReportType.EMPLOYMENT_HISTORY, ReportType.LEAVE_BALANCE, 
                         ReportType.LEAVE_TAKEN, ReportType.SALARY_ANALYSIS, ReportType.WORK_PERMIT_STATUS, 
-                        ReportType.EMPLOYEE_PERSONAL_DETAILS, ReportType.EMPLOYEE_BASIC_PROFILE],
+                        ReportType.EMPLOYEE_PERSONAL_DETAILS, ReportType.EMPLOYEE_BASIC_PROFILE,
+                        ReportType.VACATION_PAY_LEDGER],
     "search_term": [ReportType.EMPLOYEE_DIRECTORY, ReportType.EMPLOYMENT_HISTORY, ReportType.LEAVE_BALANCE, 
                     ReportType.LEAVE_TAKEN, ReportType.SALARY_ANALYSIS, ReportType.WORK_PERMIT_STATUS, 
-                    ReportType.EMPLOYEE_PERSONAL_DETAILS, ReportType.EMPLOYEE_BASIC_PROFILE],
+                    ReportType.EMPLOYEE_PERSONAL_DETAILS, ReportType.EMPLOYEE_BASIC_PROFILE,
+                    ReportType.VACATION_PAY_LEDGER],
     
     # Universal sorting and grouping filters (apply to all reports)
     "sort_by": [ReportType.EMPLOYEE_DIRECTORY, ReportType.EMPLOYMENT_HISTORY, ReportType.LEAVE_BALANCE, 
@@ -61,8 +65,8 @@ FILTER_APPLICABILITY = {
     "hire_date_to": [ReportType.EMPLOYEE_DIRECTORY, ReportType.EMPLOYEE_PERSONAL_DETAILS, ReportType.EMPLOYEE_BASIC_PROFILE],
     
     # Employment History and Leave Taken specific filters
-    "start_date": [ReportType.EMPLOYMENT_HISTORY, ReportType.LEAVE_TAKEN],
-    "end_date": [ReportType.EMPLOYMENT_HISTORY, ReportType.LEAVE_TAKEN],
+    "start_date": [ReportType.EMPLOYMENT_HISTORY, ReportType.LEAVE_TAKEN, ReportType.VACATION_PAY_LEDGER],
+    "end_date": [ReportType.EMPLOYMENT_HISTORY, ReportType.LEAVE_TAKEN, ReportType.VACATION_PAY_LEDGER],
     
     # Salary Analysis specific filters
     "pay_type": [ReportType.SALARY_ANALYSIS],

@@ -46,7 +46,7 @@ import {
   Cancel as CancelIcon,
   Person as PersonIcon,
 } from '@mui/icons-material';
-import { employeeAPI } from '../api/client';
+import { employeeAPI, leavePayrollAPI } from '../api/client';
 import type { EmployeeDeleteConsistency } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useSelectedEmployee } from '../contexts/SelectedEmployeeContext';
@@ -74,6 +74,8 @@ interface Employee {
   remarks?: string;
   paystub: boolean;
   union_member: boolean;
+  vacation_percent?: number | null;
+  vacation_percent_override?: boolean;
   use_mailing_address: boolean;
   mailing_street?: string;
   mailing_city?: string;
@@ -117,6 +119,8 @@ const EmployeePage: React.FC = () => {
     status: 'Active',
     remarks: '',
     union_member: false,
+    vacation_percent: '' as string | number,
+    vacation_percent_override: false,
     use_mailing_address: false,
     mailing_street: '',
     mailing_city: '',
@@ -138,6 +142,9 @@ const EmployeePage: React.FC = () => {
   const [uploadResult, setUploadResult] = useState<any>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [uploadLoading, setUploadLoading] = useState(false);
+  const [vacationOpeningYear, setVacationOpeningYear] = useState(new Date().getFullYear());
+  const [vacationOpeningAmount, setVacationOpeningAmount] = useState('');
+  const [vacationOpeningLoaded, setVacationOpeningLoaded] = useState(false);
 
   const { hasPermission } = useAuth();
   const { selectedEmployee: globalSelectedEmployee, setSelectedEmployee: setGlobalSelectedEmployee } = useSelectedEmployee();
@@ -238,6 +245,40 @@ const EmployeePage: React.FC = () => {
     });
   };
 
+  useEffect(() => {
+    const loadOpening = async () => {
+      if (!selectedEmployee?.id) {
+        setVacationOpeningAmount('');
+        setVacationOpeningLoaded(false);
+        return;
+      }
+      const companyId = selectedEmployee.company_id || selectedCompanyId || undefined;
+      if (!companyId) {
+        setVacationOpeningAmount('');
+        setVacationOpeningLoaded(false);
+        return;
+      }
+      try {
+        const res = await leavePayrollAPI.listOpenings({
+          employee_id: selectedEmployee.id,
+          company_id: companyId,
+          year: vacationOpeningYear,
+        });
+        const rows = res.data?.data || [];
+        if (rows.length > 0) {
+          setVacationOpeningAmount(String(rows[0].opening_amount ?? ''));
+        } else {
+          setVacationOpeningAmount('');
+        }
+        setVacationOpeningLoaded(true);
+      } catch {
+        setVacationOpeningAmount('');
+        setVacationOpeningLoaded(false);
+      }
+    };
+    loadOpening();
+  }, [selectedEmployee?.id, selectedEmployee?.company_id, selectedCompanyId, vacationOpeningYear]);
+
   const handleEditClick = () => {
     if (!selectedEmployee) return;
     setFormData({
@@ -260,6 +301,11 @@ const EmployeePage: React.FC = () => {
       status: selectedEmployee.status,
       remarks: selectedEmployee.remarks || '',
       union_member: selectedEmployee.union_member || false,
+      vacation_percent:
+        selectedEmployee.vacation_percent !== null && selectedEmployee.vacation_percent !== undefined
+          ? selectedEmployee.vacation_percent
+          : '',
+      vacation_percent_override: selectedEmployee.vacation_percent_override || false,
       use_mailing_address: selectedEmployee.use_mailing_address || false,
       mailing_street: selectedEmployee.mailing_street || '',
       mailing_city: selectedEmployee.mailing_city || '',
@@ -297,6 +343,11 @@ const EmployeePage: React.FC = () => {
         seniority_start_date: formData.seniority_start_date || null,
         remarks: formData.remarks || "",
         union_member: formData.union_member,
+        vacation_percent:
+          formData.vacation_percent === '' || formData.vacation_percent === null
+            ? null
+            : Number(formData.vacation_percent),
+        vacation_percent_override: !!formData.vacation_percent_override,
         use_mailing_address: formData.use_mailing_address,
         mailing_street: formData.mailing_street || "",
         mailing_city: formData.mailing_city || "",
@@ -307,6 +358,17 @@ const EmployeePage: React.FC = () => {
       };
 
       await employeeAPI.update(selectedEmployee.id, submitData);
+
+      const companyId = selectedEmployee.company_id || selectedCompanyId;
+      if (companyId && vacationOpeningAmount !== '') {
+        await leavePayrollAPI.upsertOpening({
+          employee_id: selectedEmployee.id,
+          company_id: companyId,
+          year: vacationOpeningYear,
+          opening_amount: Number(vacationOpeningAmount) || 0,
+        });
+        setVacationOpeningLoaded(true);
+      }
       
       // Refresh the employee list
       await loadEmployees();
@@ -333,6 +395,11 @@ const EmployeePage: React.FC = () => {
         status: formData.status,
         remarks: formData.remarks,
         union_member: formData.union_member,
+        vacation_percent:
+          formData.vacation_percent === '' || formData.vacation_percent === null
+            ? null
+            : Number(formData.vacation_percent),
+        vacation_percent_override: !!formData.vacation_percent_override,
         use_mailing_address: formData.use_mailing_address,
         mailing_street: formData.mailing_street,
         mailing_city: formData.mailing_city,
@@ -391,6 +458,11 @@ const EmployeePage: React.FC = () => {
         seniority_start_date: formData.seniority_start_date || null,
         remarks: formData.remarks || "",
         union_member: formData.union_member,
+        vacation_percent:
+          formData.vacation_percent === '' || formData.vacation_percent === null
+            ? null
+            : Number(formData.vacation_percent),
+        vacation_percent_override: !!formData.vacation_percent_override,
         use_mailing_address: formData.use_mailing_address,
         mailing_street: formData.mailing_street || "",
         mailing_city: formData.mailing_city || "",
@@ -439,6 +511,8 @@ const EmployeePage: React.FC = () => {
       status: 'Active',
       remarks: '',
       union_member: false,
+      vacation_percent: '',
+      vacation_percent_override: false,
       use_mailing_address: false,
       mailing_street: '',
       mailing_city: '',
@@ -819,6 +893,8 @@ const EmployeePage: React.FC = () => {
                     status: 'Active',
                     remarks: '',
                     union_member: false,
+                    vacation_percent: '',
+                    vacation_percent_override: false,
                     use_mailing_address: false,
                     mailing_street: '',
                     mailing_city: '',
@@ -1360,6 +1436,82 @@ const EmployeePage: React.FC = () => {
                       variant="outlined"
                     />
                   )}
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  {isEditing ? (
+                    <TextField
+                      fullWidth
+                      label="Vacation %"
+                      type="number"
+                      value={formData.vacation_percent}
+                      onChange={(e) => setFormData({ ...formData, vacation_percent: e.target.value })}
+                      disabled={!formData.vacation_percent_override}
+                      helperText={formData.vacation_percent_override ? 'Manual override' : 'From company YOS tiers (union / non-union)'}
+                      inputProps={{ min: 0, step: 0.1 }}
+                    />
+                  ) : (
+                    <TextField
+                      fullWidth
+                      label="Vacation %"
+                      value={
+                        selectedEmployee.vacation_percent !== null && selectedEmployee.vacation_percent !== undefined
+                          ? `${selectedEmployee.vacation_percent}%${selectedEmployee.vacation_percent_override ? ' (override)' : ''}`
+                          : ''
+                      }
+                      InputProps={{ readOnly: true }}
+                      variant="outlined"
+                    />
+                  )}
+                </Grid>
+                {isEditing && (
+                  <Grid item xs={12} sm={4}>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          checked={!!formData.vacation_percent_override}
+                          onChange={(e) =>
+                            setFormData({ ...formData, vacation_percent_override: e.target.checked })
+                          }
+                        />
+                      }
+                      label="Override vacation %"
+                    />
+                  </Grid>
+                )}
+                <Grid item xs={12}>
+                  <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 1 }}>
+                    Vacation $ opening (Jan 1 brought-forward balance for leave report)
+                  </Typography>
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <TextField
+                    fullWidth
+                    label="Opening Year"
+                    type="number"
+                    value={vacationOpeningYear}
+                    onChange={(e) => setVacationOpeningYear(Number(e.target.value))}
+                    disabled={!isEditing}
+                    InputLabelProps={{ shrink: true }}
+                  />
+                </Grid>
+                <Grid item xs={12} sm={4}>
+                  <TextField
+                    fullWidth
+                    label="Vacation $ Opening"
+                    type="number"
+                    value={vacationOpeningAmount}
+                    onChange={(e) => setVacationOpeningAmount(e.target.value)}
+                    disabled={!isEditing || !(selectedEmployee.company_id || selectedCompanyId)}
+                    helperText={
+                      !(selectedEmployee.company_id || selectedCompanyId)
+                        ? 'Needs company (set company filter or employment)'
+                        : vacationOpeningLoaded
+                          ? 'Saved opening for this year'
+                          : 'Not set yet — enter amount and Save'
+                    }
+                    inputProps={{ step: 0.01, min: 0 }}
+                    InputLabelProps={{ shrink: true }}
+                  />
                 </Grid>
 
                 {/* Emergency Contact */}

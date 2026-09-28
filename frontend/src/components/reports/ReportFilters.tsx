@@ -18,6 +18,8 @@ import {
   Chip,
   IconButton,
   Tooltip,
+  Autocomplete,
+  CircularProgress,
 } from '@mui/material';
 import {
   ExpandMore as ExpandMoreIcon,
@@ -27,7 +29,7 @@ import {
 } from '@mui/icons-material';
 import { ReportFilter, ReportFilters as FilterValues } from '../../types/reports';
 import { useCompanyFilter } from '../../contexts/CompanyFilterContext';
-import { reportsAPI } from '../../api/client';
+import { employeeAPI, reportsAPI } from '../../api/client';
 import { 
   validateFilters, 
   isFilterApplicable,
@@ -41,6 +43,13 @@ import {
   getFieldDescription,
   SortGroupValidationResult
 } from '../../utils/sortGroupValidation';
+
+interface EmployeeOption {
+  id: string;
+  full_name: string;
+  first_name?: string;
+  last_name?: string;
+}
 
 interface ReportFiltersProps {
   reportType: string;
@@ -71,6 +80,8 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
   const [validationResult, setValidationResult] = useState<FilterValidationResult | null>(null);
   const [sortGroupValidation, setSortGroupValidation] = useState<SortGroupValidationResult | null>(null);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
+  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
+  const [employeesLoading, setEmployeesLoading] = useState(false);
 
   // Load filter options when report type changes
   useEffect(() => {
@@ -108,12 +119,50 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
   // Set company filter from global context
   useEffect(() => {
     if (selectedCompanyId && selectedCompanyId !== filters.company_id) {
-      onFiltersChange({ ...filters, company_id: selectedCompanyId });
+      onFiltersChange({ ...filters, company_id: selectedCompanyId, employee_ids: undefined });
     }
   }, [selectedCompanyId, filters, onFiltersChange]);
 
+  // Load employees for multi-select when company is set
+  useEffect(() => {
+    const needsEmployees = filterOptions?.common_filters.some(f => f.type === 'multiselect' && f.name === 'employee_ids')
+      || filterOptions?.specific_filters.some(f => f.type === 'multiselect' && f.name === 'employee_ids');
+    if (!needsEmployees) {
+      setEmployees([]);
+      return;
+    }
+
+    const companyId = filters.company_id || selectedCompanyId;
+    if (!companyId) {
+      setEmployees([]);
+      return;
+    }
+
+    let cancelled = false;
+    const loadEmployees = async () => {
+      setEmployeesLoading(true);
+      try {
+        const response = await employeeAPI.list({ company_id: companyId });
+        if (!cancelled && response.data.success) {
+          setEmployees(response.data.data || []);
+        }
+      } catch (error) {
+        console.error('Error loading employees for report filter:', error);
+        if (!cancelled) setEmployees([]);
+      } finally {
+        if (!cancelled) setEmployeesLoading(false);
+      }
+    };
+    loadEmployees();
+    return () => { cancelled = true; };
+  }, [filters.company_id, selectedCompanyId, filterOptions]);
+
   const handleFilterChange = (name: string, value: any) => {
     const newFilters = { ...filters, [name]: value };
+    // Clear employee selection when company changes
+    if (name === 'company_id' && value !== filters.company_id) {
+      newFilters.employee_ids = undefined;
+    }
     onFiltersChange(newFilters);
     
     // Validate filters in real-time
@@ -261,6 +310,94 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
           />
         );
 
+      case 'multiselect':
+        if (filter.name === 'employee_ids') {
+          const selectedIds = typeof value === 'string' && value
+            ? value.split(',').map((id) => id.trim()).filter(Boolean)
+            : [];
+          const selectedEmployees = employees.filter((emp) => selectedIds.includes(emp.id));
+          return (
+            <Autocomplete
+              multiple
+              options={employees}
+              value={selectedEmployees}
+              loading={employeesLoading}
+              disabled={!filters.company_id && !selectedCompanyId}
+              filterSelectedOptions
+              isOptionEqualToValue={(option, val) => option.id === val.id}
+              getOptionLabel={(option) => `${option.full_name} (${option.id})`}
+              onChange={(_, newValue) => {
+                handleFilterChange(
+                  filter.name,
+                  newValue.length > 0 ? newValue.map((e) => e.id).join(',') : undefined
+                );
+              }}
+              filterOptions={(options, { inputValue }) => {
+                const term = inputValue.trim().toLowerCase();
+                if (!term) return options;
+                return options.filter((opt) =>
+                  (opt.full_name || '').toLowerCase().includes(term) ||
+                  (opt.id || '').toLowerCase().includes(term) ||
+                  (opt.first_name || '').toLowerCase().includes(term) ||
+                  (opt.last_name || '').toLowerCase().includes(term)
+                );
+              }}
+              renderTags={(tagValue, getTagProps) =>
+                tagValue.map((option, index) => (
+                  <Chip
+                    label={option.full_name}
+                    size="small"
+                    {...getTagProps({ index })}
+                    key={option.id}
+                  />
+                ))
+              }
+              renderOption={(props, option) => {
+                const { key, ...otherProps } = props as React.HTMLAttributes<HTMLLIElement> & { key?: string };
+                return (
+                  <Box component="li" key={key ?? option.id} {...otherProps}>
+                    <Box>
+                      <Typography variant="body2">{option.full_name}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        ID: {option.id}
+                      </Typography>
+                    </Box>
+                  </Box>
+                );
+              }}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label={filter.label}
+                  placeholder={selectedEmployees.length === 0 ? 'Type name to select…' : ''}
+                  size="small"
+                  error={hasWarning}
+                  helperText={
+                    hasWarning
+                      ? validationResult?.warnings.find((w) => w.includes(filter.label))
+                      : 'Leave empty for all employees'
+                  }
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {employeesLoading ? <CircularProgress color="inherit" size={16} /> : null}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                />
+              )}
+              noOptionsText={
+                !filters.company_id && !selectedCompanyId
+                  ? 'Select a company first'
+                  : 'No matching employees'
+              }
+            />
+          );
+        }
+        return null;
+
       default:
         return null;
     }
@@ -268,7 +405,7 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
 
   const getActiveFiltersCount = () => {
     return Object.values(filters).filter(value => 
-      value !== undefined && value !== '' && value !== null
+      value !== undefined && value !== '' && value !== null && !(Array.isArray(value) && value.length === 0)
     ).length;
   };
 
@@ -391,7 +528,13 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
           <AccordionDetails>
             <Grid container spacing={2}>
               {filterOptions.common_filters.map((filter) => (
-                <Grid item xs={12} sm={6} md={4} key={filter.name}>
+                <Grid
+                  item
+                  xs={12}
+                  sm={filter.type === 'multiselect' ? 12 : 6}
+                  md={filter.type === 'multiselect' ? 8 : 4}
+                  key={filter.name}
+                >
                   {renderFilterField(filter)}
                 </Grid>
               ))}

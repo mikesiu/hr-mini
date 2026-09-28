@@ -29,7 +29,8 @@ export const FILTER_CONFIGS: ReportFilterConfig[] = [
     type: 'select',
     label: 'Company',
     description: 'Filter by company',
-    applicableReports: ['employee_directory', 'employment_history', 'leave_balance', 'leave_taken', 'salary_analysis', 'work_permit_status', 'employee_personal_details', 'employee_basic_profile', 'expense_reimbursement']
+    applicableReports: ['employee_directory', 'employment_history', 'leave_balance', 'leave_taken', 'salary_analysis', 'work_permit_status', 'employee_personal_details', 'employee_basic_profile', 'expense_reimbursement', 'vacation_pay_ledger'],
+    required: false,
   },
   {
     name: 'department',
@@ -44,7 +45,7 @@ export const FILTER_CONFIGS: ReportFilterConfig[] = [
     label: 'Status',
     description: 'Employee status',
     options: ['Active', 'On Leave', 'Terminated', 'Probation', 'Active & Probation', 'All'],
-    applicableReports: ['employee_directory', 'employment_history', 'leave_balance', 'leave_taken', 'salary_analysis', 'work_permit_status', 'employee_personal_details', 'employee_basic_profile', 'expense_reimbursement']
+    applicableReports: ['employee_directory', 'employment_history', 'leave_balance', 'leave_taken', 'salary_analysis', 'work_permit_status', 'employee_personal_details', 'employee_basic_profile', 'expense_reimbursement', 'vacation_pay_ledger']
   },
   {
     name: 'search_term',
@@ -52,6 +53,13 @@ export const FILTER_CONFIGS: ReportFilterConfig[] = [
     label: 'Search',
     description: 'Search term',
     applicableReports: ['employee_directory', 'employment_history', 'leave_balance', 'leave_taken', 'salary_analysis', 'work_permit_status', 'employee_personal_details', 'employee_basic_profile', 'expense_reimbursement']
+  },
+  {
+    name: 'employee_ids',
+    type: 'multiselect',
+    label: 'Employees',
+    description: 'Select one or more employees (leave empty for all)',
+    applicableReports: ['vacation_pay_ledger']
   },
 
   // Universal sorting and grouping filters (apply to all reports)
@@ -120,14 +128,14 @@ export const FILTER_CONFIGS: ReportFilterConfig[] = [
     type: 'date',
     label: 'Start Date',
     description: 'Filter by employment start date',
-    applicableReports: ['employment_history', 'leave_taken', 'expense_reimbursement']
+    applicableReports: ['employment_history', 'leave_taken', 'expense_reimbursement', 'vacation_pay_ledger']
   },
   {
     name: 'end_date',
     type: 'date',
     label: 'End Date',
     description: 'Filter by employment end date',
-    applicableReports: ['employment_history', 'leave_taken', 'expense_reimbursement']
+    applicableReports: ['employment_history', 'leave_taken', 'expense_reimbursement', 'vacation_pay_ledger']
   },
 
   // Salary Analysis specific filters

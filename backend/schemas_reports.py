@@ -84,6 +84,8 @@ class ReportFilterBase(BaseModel):
     department: Optional[str] = None
     employee_status: Optional[str] = None  # Active, Inactive, Terminated, All
     employee_id: Optional[str] = None
+    # Comma-separated or list of employee IDs for multi-select filters
+    employee_ids: Optional[str] = None
     search_term: Optional[str] = None
     
     # Sort and Group By Options
@@ -91,6 +93,21 @@ class ReportFilterBase(BaseModel):
     sort_direction: Optional[SortDirection] = SortDirection.ASC
     group_by: Optional[GroupByField] = None
     group_by_secondary: Optional[GroupByField] = None  # For nested grouping
+
+    def resolved_employee_ids(self) -> Optional[set]:
+        """Return set of employee IDs from employee_ids and/or employee_id."""
+        ids: set = set()
+        if self.employee_ids:
+            for part in str(self.employee_ids).split(","):
+                part = part.strip()
+                if part:
+                    ids.add(part)
+        if self.employee_id:
+            for part in str(self.employee_id).split(","):
+                part = part.strip()
+                if part:
+                    ids.add(part)
+        return ids or None
 
 class EmployeeReportFilters(ReportFilterBase):
     """Filters specific to employee reports"""
@@ -231,6 +248,36 @@ class LeaveTakenData(BaseModel):
     approved_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+
+class VacationPayLedgerData(BaseModel):
+    """Per employee pay-period vacation pay ledger row"""
+    employee_id: str
+    employee_name: str
+    pay_period: str
+    pay_date: date
+    period_start: Optional[date] = None
+    period_end: Optional[date] = None
+    gross_pay: float = 0.0
+    benefits: float = 0.0
+    sick_pay: float = 0.0
+    vacation_paid: float = 0.0
+    vacation_percent: Optional[float] = None
+    vacation_amount_earned: float = 0.0
+    vacation_earned_expected: Optional[float] = None  # (gross - benefits) * %
+    vacation_taken_days: float = 0.0
+    vacation_taken_dates: str = ""
+    vacation_balance: float = 0.0
+    sick_leave_balance: float = 0.0
+    sick_leave_taken_days: float = 0.0
+    sick_leave_taken_dates: str = ""
+    opening_balance: float = 0.0
+    opening_balance_missing: bool = False
+    cheque_no: Optional[str] = None
+
+class VacationPayLedgerReportResponse(BaseModel):
+    success: bool
+    data: List[VacationPayLedgerData]
+    summary: ReportSummary
 
 class SalaryReportData(BaseModel):
     """Salary data for reports"""
@@ -384,3 +431,4 @@ class ReportType(str, Enum):
     WORK_PERMIT_STATUS = "work_permit_status"
     EMPLOYEE_PERSONAL_DETAILS = "employee_personal_details"
     EMPLOYEE_BASIC_PROFILE = "employee_basic_profile"
+    VACATION_PAY_LEDGER = "vacation_pay_ledger"

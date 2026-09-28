@@ -49,6 +49,7 @@ interface Employment {
   remarks?: string;
   wage_classification?: string;
   count_all_ot?: boolean;
+  is_driver?: boolean;
 }
 
 interface Employee {
@@ -83,6 +84,7 @@ const EmploymentPage: React.FC = () => {
     remarks: '',
     wage_classification: '',
     count_all_ot: false,
+    is_driver: false,
   });
 
   const formatDate = (dateString?: string) => {
@@ -244,6 +246,7 @@ const EmploymentPage: React.FC = () => {
         remarks: employment.remarks || '',
         wage_classification: employment.wage_classification || '',
         count_all_ot: employment.count_all_ot || false,
+        is_driver: employment.is_driver || false,
       });
     } else {
       setEditingEmployment(null);
@@ -259,6 +262,7 @@ const EmploymentPage: React.FC = () => {
         remarks: '',
         wage_classification: '',
         count_all_ot: false,
+        is_driver: false,
       });
     }
     setOpenDialog(true);
@@ -277,6 +281,7 @@ const EmploymentPage: React.FC = () => {
       remarks: '',
       wage_classification: '',
       count_all_ot: false,
+      is_driver: false,
     });
   };
 
@@ -765,6 +770,17 @@ const EmploymentPage: React.FC = () => {
                 label="Wage Classification"
                 value={formData.wage_classification}
                 onChange={(e) => setFormData({ ...formData, wage_classification: e.target.value })}
+              />
+            </Grid>
+            <Grid item xs={12} sm={6}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={formData.is_driver}
+                    onChange={(e) => setFormData({ ...formData, is_driver: e.target.checked })}
+                  />
+                }
+                label="Driver (early-start OT)"
               />
             </Grid>
             <Grid item xs={12} sm={6}>

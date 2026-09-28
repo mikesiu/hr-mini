@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Box,
   Typography,
@@ -9,13 +9,11 @@ import {
   TableContainer,
   TableHead,
   TableRow,
+  TablePagination,
   Chip,
   IconButton,
   Tooltip,
   Alert,
-  Card,
-  CardContent,
-  Grid,
   Divider,
 } from '@mui/material';
 import {
@@ -24,7 +22,9 @@ import {
   Refresh as RefreshIcon,
   Assessment as AssessmentIcon,
 } from '@mui/icons-material';
-import { ReportSummary, GroupedReportData } from '../../types/reports';
+import { ReportSummary, GroupedReportData, ReportFilters as FilterValues } from '../../types/reports';
+import { useCompanyFilter } from '../../contexts/CompanyFilterContext';
+import { FILTER_CONFIGS } from '../../utils/filterValidation';
 
 interface ReportPreviewProps {
   reportType: string;
@@ -35,7 +35,15 @@ interface ReportPreviewProps {
   onExport?: (format: string) => void;
   onRefresh?: () => void;
   isGrouped?: boolean;
+  appliedFilters?: FilterValues;
 }
+
+const SKIP_FILTER_KEYS = new Set([
+  'sort_by',
+  'sort_direction',
+  'group_by',
+  'group_by_secondary',
+]);
 
 export const ReportPreview: React.FC<ReportPreviewProps> = ({
   reportType,
@@ -46,7 +54,16 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
   onExport,
   onRefresh,
   isGrouped = false,
+  appliedFilters,
 }) => {
+  const { companies } = useCompanyFilter();
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(25);
+
+  useEffect(() => {
+    setPage(0);
+  }, [reportType, data, rowsPerPage]);
+
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'N/A';
     try {
@@ -84,6 +101,58 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
     }
   };
 
+  const formatFilterValue = (key: string, value: any): string | null => {
+    if (value === undefined || value === null || value === '') return null;
+    if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+    if (key === 'company_id') {
+      const company = companies.find((c) => c.id === value);
+      return company
+        ? `${company.legal_name}${company.trade_name ? ` (${company.trade_name})` : ''}`
+        : String(value);
+    }
+    if (key === 'employee_ids') {
+      const ids = String(value).split(',').map((id) => id.trim()).filter(Boolean);
+      if (ids.length === 0) return null;
+      return ids.length === 1 ? ids[0] : `${ids.length} selected`;
+    }
+    if (key === 'include_inactive' || key === 'include_history' || key === 'is_expired') {
+      return value ? 'Yes' : 'No';
+    }
+    return String(value);
+  };
+
+  const filterSummaryChips = useMemo(() => {
+    const source: Record<string, any> = {
+      ...(summary.filters_applied || {}),
+      ...(appliedFilters || {}),
+    };
+    const chips: { key: string; label: string; value: string }[] = [];
+    Object.entries(source).forEach(([key, value]) => {
+      if (SKIP_FILTER_KEYS.has(key)) return;
+      const display = formatFilterValue(key, value);
+      if (!display) return;
+      const config = FILTER_CONFIGS.find((f) => f.name === key);
+      const label = config?.label
+        || (key === 'year' ? 'Year' : key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()));
+      // Prefer appliedFilters over summary when both present — de-dupe by key
+      const existing = chips.findIndex((c) => c.key === key);
+      if (existing >= 0) chips[existing] = { key, label, value: display };
+      else chips.push({ key, label, value: display });
+    });
+    return chips;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- formatFilterValue uses companies
+  }, [appliedFilters, summary.filters_applied, companies]);
+
+  const flatRows = isGrouped ? [] : (data as any[]);
+  const totalRecordCount = summary.total_records ?? (isGrouped
+    ? (data as GroupedReportData[]).reduce((sum, g) => sum + (g.group_count || g.records?.length || 0), 0)
+    : flatRows.length);
+  const totalPages = isGrouped ? 1 : Math.max(1, Math.ceil(flatRows.length / rowsPerPage));
+  const pageRows = useMemo(() => {
+    if (isGrouped) return [];
+    return flatRows.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  }, [flatRows, isGrouped, page, rowsPerPage]);
+
   const getTableHeaders = (): string[] => {
     switch (reportType) {
       case 'employee_directory':
@@ -96,6 +165,12 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
         return ['Employee', 'Vacation Days', 'Sick Days', 'Personal Days', 'Total Used', 'Total Remaining'];
       case 'leave_taken':
         return ['Employee', 'Leave Type', 'Start Date', 'End Date', 'Days', 'Status', 'Reason'];
+      case 'vacation_pay_ledger':
+        return [
+          'Employee', 'Payroll Date', 'Gross', 'Benefits', 'Vac Paid',
+          'Vac %', 'Vac Earned', 'Vac Taken', 'Vac Dates', 'Vac Balance $',
+          'Sick Pay', 'Sick Bal', 'Sick Taken', 'Sick Dates',
+        ];
       case 'work_permit_status':
         return ['Employee', 'Permit Type', 'Expiry Date', 'Days Until Expiry', 'Status'];
       case 'employee_personal_details':
@@ -202,6 +277,30 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
           record.status || 'N/A',
           record.reason || 'N/A'
         ];
+      case 'vacation_pay_ledger':
+        return [
+          <Box key="employee">
+            <Typography variant="body2" fontWeight="medium">
+              {record.employee_name || 'N/A'}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {record.employee_id || 'N/A'}
+            </Typography>
+          </Box>,
+          formatDate(record.pay_date),
+          formatCurrency(record.gross_pay),
+          formatCurrency(record.benefits),
+          formatCurrency(record.vacation_paid),
+          record.vacation_percent != null ? `${record.vacation_percent}%` : '',
+          formatCurrency(record.vacation_amount_earned),
+          `${record.vacation_taken_days ?? 0}`,
+          record.vacation_taken_dates || '',
+          formatCurrency(record.vacation_balance),
+          formatCurrency(record.sick_pay),
+          record.sick_leave_balance ?? 0,
+          `${record.sick_leave_taken_days ?? 0}`,
+          record.sick_leave_taken_dates || '',
+        ];
       case 'work_permit_status':
         return [
           <Box key="employee">
@@ -281,7 +380,7 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map((employee) => (
+          {pageRows.map((employee) => (
             <TableRow key={employee.id}>
               <TableCell>{employee.id}</TableCell>
               <TableCell>
@@ -325,7 +424,7 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map((employment, index) => (
+          {pageRows.map((employment, index) => (
             <TableRow key={index}>
               <TableCell>
                 <Typography variant="body2" fontWeight="medium">
@@ -373,7 +472,7 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map((salary, index) => (
+          {pageRows.map((salary, index) => (
             <TableRow key={index}>
               <TableCell>
                 <Typography variant="body2" fontWeight="medium">
@@ -416,7 +515,7 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map((permit, index) => (
+          {pageRows.map((permit, index) => (
             <TableRow key={index}>
               <TableCell>
                 <Typography variant="body2" fontWeight="medium">
@@ -492,7 +591,7 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map((balance, index) => (
+          {pageRows.map((balance, index) => (
             <TableRow key={index}>
               <TableCell>
                 <Typography variant="body2" fontWeight="medium">
@@ -548,7 +647,7 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map((leave, index) => (
+          {pageRows.map((leave, index) => (
             <TableRow key={index}>
               <TableCell>
                 <Typography variant="body2" fontWeight="medium">
@@ -614,7 +713,7 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map((record, index) => (
+          {pageRows.map((record, index) => (
             <TableRow key={index} hover>
               {getTableCells(record).map((cell, cellIndex) => (
                 <TableCell key={cellIndex}>
@@ -641,7 +740,7 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
           </TableRow>
         </TableHead>
         <TableBody>
-          {data.map((record, index) => (
+          {pageRows.map((record, index) => (
             <TableRow key={index} hover>
               {getTableCells(record).map((cell, cellIndex) => (
                 <TableCell key={cellIndex}>
@@ -669,6 +768,8 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
         return renderLeaveBalanceTable();
       case 'leave_taken':
         return renderLeaveTakenTable();
+      case 'vacation_pay_ledger':
+        return renderEmployeePersonalDetailsTable();
       case 'employee_personal_details':
         return renderEmployeePersonalDetailsTable();
       case 'employee_basic_profile':
@@ -793,11 +894,11 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
   return (
     <Box sx={{ p: 2 }}>
       {/* Report Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <AssessmentIcon sx={{ mr: 1 }} />
           <Typography variant="h6">
-            {reportType.replace('_', ' ').toUpperCase()} Report
+            {reportType.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())} Report
           </Typography>
         </Box>
         
@@ -828,72 +929,86 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
         </Box>
       </Box>
 
-      {/* Report Summary */}
-      <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography variant="h4" color="primary">
-                {summary.total_records}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Total Records
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography variant="h4" color="secondary">
-                {summary.total_pages}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Total Pages
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography variant="h4" color="success.main">
-                {summary.current_page}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Current Page
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-        
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Typography variant="body2" color="text.secondary">
-                Generated At
-              </Typography>
-              <Typography variant="body2">
-                {formatDate(summary.generated_at)}
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      {/* Compact filters + record count */}
+      <Box
+        sx={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: 1,
+          mb: 2,
+          py: 0.5,
+        }}
+      >
+        <Typography variant="body2" color="text.secondary">
+          {totalRecordCount} record{totalRecordCount === 1 ? '' : 's'}
+          {filterSummaryChips.length > 0 ? ' ·' : ''}
+        </Typography>
+        {filterSummaryChips.map((chip) => (
+          <Chip
+            key={chip.key}
+            size="small"
+            variant="outlined"
+            label={`${chip.label}: ${chip.value}`}
+            sx={{ height: 24, '& .MuiChip-label': { px: 1, fontSize: '0.75rem' } }}
+          />
+        ))}
+        {summary.generated_at && (
+          <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto' }}>
+            Generated {formatDate(summary.generated_at)}
+          </Typography>
+        )}
+      </Box>
 
-      <Divider sx={{ mb: 3 }} />
+      <Divider sx={{ mb: 2 }} />
 
       {/* Report Data */}
       {data.length === 0 ? (
         <Alert severity="info">
           No data found for the selected filters. Try adjusting your filter criteria.
         </Alert>
-      ) : isGrouped ? (
-        renderGroupedData()
       ) : (
-        renderTable()
+        <>
+          {isGrouped ? renderGroupedData() : renderTable()}
+
+          {!isGrouped && (
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 1,
+                mt: 1,
+                pt: 1,
+                borderTop: 1,
+                borderColor: 'divider',
+              }}
+            >
+              <Typography variant="body2" color="text.secondary">
+                Page {Math.min(page + 1, totalPages)} of {totalPages}
+              </Typography>
+              <TablePagination
+                component="div"
+                count={flatRows.length}
+                page={page}
+                onPageChange={(_, newPage) => setPage(newPage)}
+                rowsPerPage={rowsPerPage}
+                onRowsPerPageChange={(e) => {
+                  setRowsPerPage(parseInt(e.target.value, 10));
+                  setPage(0);
+                }}
+                rowsPerPageOptions={[10, 25, 50, 100]}
+                labelRowsPerPage="Rows"
+                sx={{
+                  border: 0,
+                  '.MuiTablePagination-toolbar': { minHeight: 40, pl: 0 },
+                  '.MuiTablePagination-displayedRows': { display: 'none' },
+                }}
+              />
+            </Box>
+          )}
+        </>
       )}
     </Box>
   );

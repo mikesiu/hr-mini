@@ -14,10 +14,12 @@ import { ReportFilters } from '../components/reports/ReportFilters';
 import { ReportPreview } from '../components/reports/ReportPreview';
 import { reportsAPI } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import { useCompanyFilter } from '../contexts/CompanyFilterContext';
 import {
   ReportType,
   ReportFilters as FilterValues,
 } from '../types/reports';
+import { FILTER_CONFIGS } from '../utils/filterValidation';
 // Dynamic import for ExcelJS
 
 // Helper function to format dates correctly without timezone issues
@@ -71,6 +73,7 @@ export default function ReportsPage() {
   const [error, setError] = useState<string | null>(null);
   
   const { hasPermission } = useAuth();
+  const { companies } = useCompanyFilter();
 
   // Load available report types
   useEffect(() => {
@@ -143,6 +146,9 @@ export default function ReportsPage() {
         case 'leave_taken':
           response = await reportsAPI.leaveTaken(filters);
           break;
+        case 'vacation_pay_ledger':
+          response = await reportsAPI.vacationPayLedger(filters);
+          break;
         case 'salary_analysis':
           response = await reportsAPI.salaryAnalysis(filters);
           break;
@@ -188,6 +194,37 @@ export default function ReportsPage() {
     setFilters({});
   };
 
+  const formatPrintFilters = () => {
+    const skip = new Set(['sort_by', 'sort_direction', 'group_by', 'group_by_secondary']);
+    const source: Record<string, any> = {
+      ...(reportSummary?.filters_applied || {}),
+      ...filters,
+    };
+    const parts: string[] = [];
+    Object.entries(source).forEach(([key, value]) => {
+      if (skip.has(key) || value === undefined || value === null || value === '') return;
+      const config = FILTER_CONFIGS.find((f) => f.name === key);
+      const label = config?.label
+        || (key === 'year' ? 'Year' : key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()));
+      let display = String(value);
+      if (key === 'company_id') {
+        const company = companies.find((c) => c.id === value);
+        display = company
+          ? `${company.legal_name}${company.trade_name ? ` (${company.trade_name})` : ''}`
+          : display;
+      } else if (key === 'employee_ids') {
+        const ids = String(value).split(',').map((id) => id.trim()).filter(Boolean);
+        display = ids.length <= 1 ? (ids[0] || '') : `${ids.length} selected`;
+        if (!display) return;
+      } else if (typeof value === 'boolean') {
+        display = value ? 'Yes' : 'No';
+      }
+      parts.push(`<span class="label">${label}:</span> ${display}`);
+    });
+    if (parts.length === 0) return '';
+    return ` &nbsp;·&nbsp; ${parts.join(' &nbsp;·&nbsp; ')}`;
+  };
+
   const handlePrint = () => {
     // Create a print-friendly version
     const printWindow = window.open('', '_blank');
@@ -199,44 +236,40 @@ export default function ReportsPage() {
           <title>${selectedReportType.replace('_', ' ').toUpperCase()} Report</title>
           <style>
             body { font-family: Arial, sans-serif; margin: 20px; }
-            .report-header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
-            .report-title { font-size: 24px; font-weight: bold; margin-bottom: 5px; }
-            .report-subtitle { font-size: 14px; color: #666; }
-            .report-summary { display: flex; justify-content: space-around; margin-bottom: 20px; }
-            .summary-card { text-align: center; border: 1px solid #ccc; padding: 10px; margin: 0 5px; }
-            .summary-value { font-size: 18px; font-weight: bold; }
-            .summary-label { font-size: 12px; color: #666; }
-            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            .report-header { text-align: center; margin-bottom: 16px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+            .report-title { font-size: 22px; font-weight: bold; margin-bottom: 4px; }
+            .report-subtitle { font-size: 12px; color: #666; }
+            .report-meta { font-size: 12px; color: #444; margin-bottom: 16px; line-height: 1.5; }
+            .report-meta .label { color: #666; }
+            table { width: 100%; border-collapse: collapse; margin-top: 12px; }
             th, td { border: 1px solid #000; padding: 8px; text-align: left; font-size: 12px; }
             th { background-color: #f0f0f0; font-weight: bold; }
-            .report-footer { margin-top: 30px; text-align: center; font-size: 10px; color: #666; border-top: 1px solid #ccc; padding-top: 10px; }
+            .report-footer { margin-top: 24px; text-align: center; font-size: 10px; color: #666; border-top: 1px solid #ccc; padding-top: 8px; }
+            @page {
+              margin: 15mm;
+              @bottom-center {
+                content: "Page " counter(page) " of " counter(pages);
+                font-size: 10pt;
+                color: #666;
+              }
+            }
           </style>
         </head>
         <body>
           <div class="report-header">
-            <div class="report-title">${selectedReportType.replace('_', ' ').toUpperCase()} Report</div>
+            <div class="report-title">${selectedReportType.replace(/_/g, ' ').toUpperCase()} Report</div>
             <div class="report-subtitle">Generated on ${new Date(reportSummary?.generated_at || Date.now()).toLocaleDateString()}</div>
           </div>
           
-          <div class="report-summary">
-            <div class="summary-card">
-              <div class="summary-value">${reportSummary?.total_records || 0}</div>
-              <div class="summary-label">Total Records</div>
-            </div>
-            <div class="summary-card">
-              <div class="summary-value">${reportSummary?.total_pages || 1}</div>
-              <div class="summary-label">Total Pages</div>
-            </div>
-            <div class="summary-card">
-              <div class="summary-value">${reportSummary?.current_page || 1}</div>
-              <div class="summary-label">Current Page</div>
-            </div>
+          <div class="report-meta">
+            <span class="label">Records:</span> ${reportSummary?.total_records || 0}
+            ${formatPrintFilters()}
           </div>
           
           ${generatePrintTable()}
           
           <div class="report-footer">
-            HR Management System - ${selectedReportType.replace('_', ' ').toUpperCase()} Report
+            HR Management System — ${selectedReportType.replace(/_/g, ' ').toUpperCase()} Report
           </div>
         </body>
         </html>
@@ -267,6 +300,8 @@ export default function ReportsPage() {
           return ['Employee', 'Vacation Entitlement', 'Vacation Taken', 'Vacation Balance', 'Sick Entitlement', 'Sick Taken', 'Sick Balance'];
         case 'leave_taken':
           return ['Employee', 'Leave Type', 'Start Date', 'End Date', 'Days', 'Status', 'Reason'];
+        case 'vacation_pay_ledger':
+          return ['Employee', 'Gross', 'Benefits', 'Vac Paid', 'Vac %', 'Vac Earned', 'Vac Taken', 'Vac Balance', 'Sick Pay', 'Sick Bal', 'Sick Taken'];
         case 'expense_reimbursement':
           return ['Employee', 'Claim ID', 'Paid Date', 'Expense Type', 'Receipts Amount', 'Claims Amount', 'Notes', 'Document'];
         case 'employee_basic_profile':
@@ -633,6 +668,48 @@ export default function ReportsPage() {
         });
         break;
         
+      case 'vacation_pay_ledger':
+        tableHtml += `
+          <thead>
+            <tr>
+              <th>Employee</th>
+              <th>Payroll Date</th>
+              <th>Gross Pay</th>
+              <th>Benefits</th>
+              <th>Vacation Paid</th>
+              <th>Vac %</th>
+              <th>Vac Earned</th>
+              <th>Vac Taken</th>
+              <th>Vac Balance $</th>
+              <th>Sick Pay</th>
+              <th>Sick Bal</th>
+              <th>Sick Taken</th>
+            </tr>
+          </thead>
+          <tbody>
+        `;
+        reportData.forEach((row: any) => {
+          const money = (n: number) =>
+            new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(n || 0);
+          tableHtml += `
+            <tr>
+              <td><strong>${row.employee_name || 'N/A'}</strong><br><small>${row.employee_id || ''}</small></td>
+              <td><strong>${formatDateString(row.pay_date)}</strong></td>
+              <td>${money(row.gross_pay)}</td>
+              <td>${money(row.benefits)}</td>
+              <td>${money(row.vacation_paid)}</td>
+              <td>${row.vacation_percent != null ? row.vacation_percent + '%' : ''}</td>
+              <td>${money(row.vacation_amount_earned)}</td>
+              <td>${row.vacation_taken_days?.toFixed?.(1) || 0} ${row.vacation_taken_dates || ''}</td>
+              <td><strong>${money(row.vacation_balance)}</strong></td>
+              <td>${money(row.sick_pay)}</td>
+              <td>${row.sick_leave_balance?.toFixed?.(1) || 0}</td>
+              <td>${row.sick_leave_taken_days?.toFixed?.(1) || 0} ${row.sick_leave_taken_dates || ''}</td>
+            </tr>
+          `;
+        });
+        break;
+
       case 'leave_taken':
         tableHtml += `
           <thead>
@@ -860,16 +937,22 @@ export default function ReportsPage() {
         return ['Employee', 'Company', 'Position', 'Department', 'Start Date', 'End Date', 'Status', 'Duration'];
       case 'leave_balance':
         return ['Employee', 'Vacation Entitlement', 'Vacation Taken', 'Vacation Balance', 'Sick Entitlement', 'Sick Taken', 'Sick Balance'];
-        case 'leave_taken':
-          return ['Employee', 'Leave Type', 'Start Date', 'End Date', 'Days', 'Status', 'Reason'];
-        case 'salary_analysis':
-          return ['Employee', 'Position', 'Company', 'Pay Rate', 'Pay Type', 'Effective Date', 'End Date', 'Notes'];
-        case 'expense_reimbursement':
-          return ['Employee', 'Claim ID', 'Paid Date', 'Expense Type', 'Receipts Amount', 'Claims Amount', 'Notes', 'Document'];
-        case 'employee_basic_profile':
-          return ['Name', 'Company', 'Current Position', 'Age'];
-        default:
-          return ['Data'];
+      case 'leave_taken':
+        return ['Employee', 'Leave Type', 'Start Date', 'End Date', 'Days', 'Status', 'Reason'];
+      case 'vacation_pay_ledger':
+        return [
+          'Employee', 'Payroll Date', 'Gross Pay', 'Benefits', 'Vacation Paid',
+          'Vacation %', 'Vacation Earned', 'Vacation Taken Days', 'Vacation Taken Dates',
+          'Vacation Balance $', 'Sick Pay', 'Sick Balance', 'Sick Taken Days', 'Sick Taken Dates', 'Opening $',
+        ];
+      case 'salary_analysis':
+        return ['Employee', 'Position', 'Company', 'Pay Rate', 'Pay Type', 'Effective Date', 'End Date', 'Notes'];
+      case 'expense_reimbursement':
+        return ['Employee', 'Claim ID', 'Paid Date', 'Expense Type', 'Receipts Amount', 'Claims Amount', 'Notes', 'Document'];
+      case 'employee_basic_profile':
+        return ['Name', 'Company', 'Current Position', 'Age'];
+      default:
+        return ['Data'];
     }
   };
 
@@ -917,6 +1000,24 @@ export default function ReportsPage() {
           record.days_taken || 0,
           record.status || 'N/A',
           record.reason || 'N/A'
+        ];
+      case 'vacation_pay_ledger':
+        return [
+          `${record.employee_name || 'N/A'} (${record.employee_id || 'N/A'})`,
+          formatDateString(record.pay_date),
+          record.gross_pay ?? 0,
+          record.benefits ?? 0,
+          record.vacation_paid ?? 0,
+          record.vacation_percent ?? '',
+          record.vacation_amount_earned ?? 0,
+          record.vacation_taken_days ?? 0,
+          record.vacation_taken_dates || '',
+          record.vacation_balance ?? 0,
+          record.sick_pay ?? 0,
+          record.sick_leave_balance ?? 0,
+          record.sick_leave_taken_days ?? 0,
+          record.sick_leave_taken_dates || '',
+          record.opening_balance ?? 0,
         ];
         case 'salary_analysis':
           return [
@@ -1016,6 +1117,7 @@ export default function ReportsPage() {
               onExport={handleExport}
               onRefresh={handleRefresh}
               isGrouped={reportSummary?.group_by_applied && reportSummary.group_by_applied.length > 0}
+              appliedFilters={filters}
             />
           ) : (
             <Alert severity="info">
