@@ -537,18 +537,12 @@ const EmployeePage: React.FC = () => {
   // Upload functionality
   const downloadTemplate = async () => {
     try {
+      const { downloadBlobFile } = await import('../utils/downloadFile');
       const response = await employeeAPI.downloadTemplate();
-      const blob = new Blob([response.data], { 
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      await downloadBlobFile({
+        filename: 'employee_import_template.xlsx',
+        data: response.data,
       });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'employee_import_template.xlsx';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to download template');
     }

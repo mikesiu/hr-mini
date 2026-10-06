@@ -26,7 +26,12 @@ from repos.attendance_repo import (
 from repos.attendance_period_override_repo import (
     get_override, create_or_update_override, delete_override
 )
-from repos.employee_repo import get_employee
+from repos.employee_repo import (
+    get_employee,
+    list_employee_ids_for_period,
+    filter_employee_ids_active_in_period,
+    get_employee_active_bounds_map,
+)
 from repos.employment_repo import get_current_employment
 from repos.employee_schedule_repo import get_schedule_for_date
 from repos.company_repo import get_company_by_id
@@ -38,10 +43,110 @@ from services.attendance_service import (
 )
 from services.stat_holiday_service import calculate_stat_holiday_entitlement
 from utils.time_rounding import round_check_in, round_check_out
+from utils.leave_calculation import iter_leave_chargeable_dates
 from services.payroll_period_service import calculate_pay_periods
 from models.work_schedule import WorkSchedule
 
 router = APIRouter()
+
+
+def _scheduled_hours_for_date(employee_id: str, work_date: date) -> float:
+    """Return scheduled hours for an employee on a date, or 0 if none."""
+    employee_schedule = get_schedule_for_date(employee_id, work_date)
+    if not employee_schedule or not getattr(employee_schedule, "schedule", None):
+        return 0.0
+    try:
+        work_schedule = employee_schedule.schedule
+        if isinstance(work_schedule, WorkSchedule) and hasattr(work_schedule, "get_day_times"):
+            schedule_start, schedule_end = work_schedule.get_day_times(work_date.weekday())
+            if schedule_start and schedule_end:
+                schedule_start_dt = datetime.combine(work_date, schedule_start)
+                schedule_end_dt = datetime.combine(work_date, schedule_end)
+                if schedule_end < schedule_start:
+                    schedule_end_dt += timedelta(days=1)
+                return (schedule_end_dt - schedule_start_dt).total_seconds() / 3600.0
+    except (AttributeError, TypeError):
+        pass
+    return 0.0
+
+
+def _display_hours_matching_attendance_list(
+    attendance,
+    leave,
+    employee_id: str,
+    work_date: date,
+    *,
+    is_stat_holiday: bool = False,
+) -> tuple[float, float, float, float]:
+    """
+    Return (regular, ot, weekend_ot, stat_holiday) hours the same way the
+    attendance list UI displays them (override preferred; paid sick leave filled in).
+    """
+    # Prefer explicit overrides (same as frontend AttendancePage effective hours)
+    is_weekend = work_date.weekday() >= 5
+    # Paid sick leave only applies on chargeable leave days (not weekends/stat holidays)
+    apply_paid_sick = leave is not None and not is_weekend and not is_stat_holiday
+
+    if attendance is not None and attendance.override_regular_hours is not None:
+        regular = float(attendance.override_regular_hours)
+    elif attendance is not None:
+        regular = float(attendance.regular_hours or 0.0)
+        # Match list API: if no punches and stored regular is 0, fill paid sick leave hours
+        if regular == 0.0 and not attendance.check_in and not attendance.check_out and apply_paid_sick:
+            leave_type_code = None
+            try:
+                from models.base import SessionLocal
+                from models.leave_type import LeaveType
+                with SessionLocal() as session:
+                    leave_type_obj = session.get(LeaveType, leave.leave_type_id)
+                    if leave_type_obj:
+                        leave_type_code = leave_type_obj.code
+            except Exception:
+                leave_type_code = None
+            if leave_type_code and leave_type_code.upper() == "SICK":
+                scheduled = _scheduled_hours_for_date(employee_id, work_date)
+                regular = scheduled if scheduled > 0 else 8.0
+    else:
+        regular = 0.0
+        if apply_paid_sick:
+            leave_type_code = None
+            try:
+                from models.base import SessionLocal
+                from models.leave_type import LeaveType
+                with SessionLocal() as session:
+                    leave_type_obj = session.get(LeaveType, leave.leave_type_id)
+                    if leave_type_obj:
+                        leave_type_code = leave_type_obj.code
+            except Exception:
+                leave_type_code = None
+            if leave_type_code and leave_type_code.upper() == "SICK":
+                scheduled = _scheduled_hours_for_date(employee_id, work_date)
+                regular = scheduled if scheduled > 0 else 8.0
+            elif leave_type_code and leave_type_code.upper() == "VAC":
+                regular = 0.0
+
+    if attendance is not None:
+        ot = (
+            float(attendance.override_ot_hours)
+            if attendance.override_ot_hours is not None
+            else float(attendance.ot_hours or 0.0)
+        )
+        weekend_ot = (
+            float(attendance.override_weekend_ot_hours)
+            if attendance.override_weekend_ot_hours is not None
+            else float(attendance.weekend_ot_hours or 0.0)
+        )
+        stat_holiday = (
+            float(attendance.override_stat_holiday_hours)
+            if attendance.override_stat_holiday_hours is not None
+            else float(attendance.stat_holiday_hours or 0.0)
+        )
+    else:
+        ot = 0.0
+        weekend_ot = 0.0
+        stat_holiday = 0.0
+
+    return regular, ot, weekend_ot, stat_holiday
 
 
 def _parse_time(time_str: Optional[str]) -> Optional[time]:
@@ -547,18 +652,25 @@ async def list_attendance_records(
             # Ensure we have at least one company to check (use company_id filter if available)
             companies_to_check = company_ids if company_ids else (set([company_id]) if company_id else set())
             
-            # Get leave records for all employees
+            # Get leave records for all employees (exclude weekends/stat holidays —
+            # those days are not charged against leave balances)
             all_leaves = {}
             for emp_id in employee_ids:
                 leaves = get_leaves_in_range(emp_id, start_date, end_date)
+                employment = get_current_employment(emp_id, start_date)
+                emp_company_id = employment.company_id if employment else company_id
                 for leave in leaves:
-                    leave_date = leave.start_date
-                    while leave_date <= leave.end_date:
-                        if start_date <= leave_date <= end_date:
-                            key = (emp_id, leave_date)
-                            if key not in all_leaves:
-                                all_leaves[key] = leave
-                        leave_date += timedelta(days=1)
+                    for leave_date in iter_leave_chargeable_dates(
+                        leave.start_date,
+                        leave.end_date,
+                        company_id=emp_company_id,
+                        employee_id=emp_id,
+                        range_start=start_date,
+                        range_end=end_date,
+                    ):
+                        key = (emp_id, leave_date)
+                        if key not in all_leaves:
+                            all_leaves[key] = leave
             
             # Get holiday names for all companies
             # Query all holidays for all companies in the date range
@@ -661,7 +773,13 @@ async def list_attendance_records(
                     # Check if we need to calculate regular hours for sick leave
                     # BUT respect override_regular_hours if it exists
                     display_regular_hours = attendance.regular_hours or 0.0
-                    if display_regular_hours == 0.0 and not attendance.check_in and not attendance.check_out and leave:
+                    if (
+                        display_regular_hours == 0.0
+                        and not attendance.check_in
+                        and not attendance.check_out
+                        and leave
+                        and not stat_holiday_name
+                    ):
                         # Check if there's an override first - if so, don't override it with sick leave calculation
                         has_override = attendance.override_regular_hours is not None
                         if not has_override:
@@ -745,14 +863,14 @@ async def list_attendance_records(
                     if not employment or (company_id and employment.company_id != company_id):
                         continue  # Skip if employee not employed or wrong company
                     
-                    # Calculate regular hours for paid leave
+                    # Calculate regular hours for paid leave (not on statutory holidays)
                     regular_hours = 0.0
-                    if leave:
+                    if leave and not stat_holiday_name:
                         with SessionLocal() as session:
                             from models.leave_type import LeaveType
                             leave_type_obj = session.get(LeaveType, leave.leave_type_id) if leave else None
-                            if leave_type_obj and leave_type_obj.code.upper() in ["SICK", "VAC"]:
-                                # Paid leave - calculate scheduled hours
+                            if leave_type_obj and leave_type_obj.code.upper() == "SICK":
+                                # Paid sick leave - calculate scheduled hours
                                 employee_schedule = get_schedule_for_date(emp_id, record_date)
                                 scheduled_hours = 0.0
                                 if employee_schedule and employee_schedule.schedule:
@@ -773,8 +891,10 @@ async def list_attendance_records(
                                         pass
                                 
                                 if scheduled_hours == 0.0:
-                                    scheduled_hours = 8.0  # Default for paid leave
+                                    scheduled_hours = 8.0  # Default for paid sick leave
                                 regular_hours = scheduled_hours
+                            elif leave_type_obj and leave_type_obj.code.upper() == "VAC":
+                                regular_hours = 0.0
                     
                     # Calculate stat holiday hours if applicable
                     stat_holiday_hours = 0.0
@@ -839,16 +959,17 @@ async def list_attendance_records(
         
         # Get all leave records for the employee in the period
         leaves = get_leaves_in_range(employee_id, start_date, end_date)
-        # Create a map of date -> leave record
+        # Create a map of date -> leave record (working days only; matches leave day count)
         leave_map = {}
         for leave in leaves:
-            # Iterate through all dates in the leave range
-            leave_date = leave.start_date
-            while leave_date <= leave.end_date:
-                # Only include dates that are within the pay period
-                if start_date <= leave_date <= end_date:
-                    leave_map[leave_date] = leave
-                leave_date += timedelta(days=1)
+            for leave_date in iter_leave_chargeable_dates(
+                leave.start_date,
+                leave.end_date,
+                holiday_dates=holiday_dates,
+                range_start=start_date,
+                range_end=end_date,
+            ):
+                leave_map[leave_date] = leave
         
         # Get existing attendance records
         existing_attendance = list_attendance(
@@ -959,7 +1080,8 @@ async def list_attendance_records(
                 regular_hours = attendance.get_effective_regular_hours() or 0.0
                 
                 # Check for sick leave even if regular hours exist (handles attendance records with regular_hours set)
-                if not attendance.check_in and not attendance.check_out:
+                # Do not pay sick leave hours on a statutory holiday
+                if not attendance.check_in and not attendance.check_out and not is_stat_holiday:
                     has_override = attendance.override_regular_hours is not None
                     if leave and leave_type_code and leave_type_code.upper() == "SICK":
                         # Sick leave is paid, use scheduled hours OR existing regular hours
@@ -971,7 +1093,7 @@ async def list_attendance_records(
                                     regular_hours = scheduled_hours
                                 else:
                                     regular_hours = 8.0  # Default for paid sick leave
-            elif leave and leave_type_code:
+            elif leave and leave_type_code and not is_stat_holiday:
                 # Check if it's a paid leave type (Sick Leave or Vacation)
                 # Vacation days should show 0.00 regular hours (they count towards eligibility but not hours)
                 # Sick leave is still paid leave and shows regular hours
@@ -1172,6 +1294,18 @@ async def get_detailed_attendance_report(
                     end_date=end_date.isoformat(),
                     details=[],
                 )
+
+            # Skip employees terminated before / hired after the period
+            if not filter_employee_ids_active_in_period({filter_employee_id}, start_date, end_date):
+                company = get_company_by_id(company_id) if company_id else None
+                return AttendanceDetailedReportResponse(
+                    success=True,
+                    company_id=company_id,
+                    company_name=company.legal_name if company else None,
+                    start_date=start_date.isoformat(),
+                    end_date=end_date.isoformat(),
+                    details=[],
+                )
             
             # Get all holidays in the period (filtered by union membership)
             holidays = get_holidays_in_range(company_id, start_date, end_date, filter_employee_id)
@@ -1192,11 +1326,14 @@ async def get_detailed_attendance_report(
             leaves = get_leaves_in_range(filter_employee_id, start_date, end_date)
             leave_map = {}
             for leave in leaves:
-                leave_date = leave.start_date
-                while leave_date <= leave.end_date:
-                    if start_date <= leave_date <= end_date:
-                        leave_map[leave_date] = leave
-                    leave_date += timedelta(days=1)
+                for leave_date in iter_leave_chargeable_dates(
+                    leave.start_date,
+                    leave.end_date,
+                    holiday_dates=set(holiday_names.keys()),
+                    range_start=start_date,
+                    range_end=end_date,
+                ):
+                    leave_map[leave_date] = leave
             
             # Get existing attendance records
             existing_attendance = list_attendance(
@@ -1206,11 +1343,21 @@ async def get_detailed_attendance_report(
                 company_id=company_id,
             )
             attendance_map = {record.date: record for record in existing_attendance}
+            active_from, active_to = get_employee_active_bounds_map({filter_employee_id}).get(
+                filter_employee_id, (None, None)
+            )
             
             # Generate all dates in the pay period
             detail_rows = []
             current_date = start_date
             while current_date <= end_date:
+                if active_from and current_date < active_from:
+                    current_date += timedelta(days=1)
+                    continue
+                if active_to and current_date > active_to:
+                    current_date += timedelta(days=1)
+                    continue
+
                 attendance = attendance_map.get(current_date)
                 leave = leave_map.get(current_date)
                 leave_type_name = None
@@ -1224,8 +1371,8 @@ async def get_detailed_attendance_report(
                 
                 stat_holiday_name = holiday_names.get(current_date)
                 
-                # Determine day type
-                day_type = "Weekend" if current_date.weekday() >= 5 else "Weekday"
+                # Day name (Monday, Tuesday, ...)
+                day_type = current_date.strftime("%A")
                 
                 if attendance:
                     employee = get_employee(attendance.employee_id)
@@ -1254,6 +1401,14 @@ async def get_detailed_attendance_report(
                             # If no leave or holiday, remarks goes in leave column
                             final_leave_type = attendance.remarks
                     
+                    # Match attendance list display hours (incl. paid sick leave fill-in)
+                    reg_h, ot_h, wot_h, stat_h = _display_hours_matching_attendance_list(
+                        attendance,
+                        leave,
+                        attendance.employee_id,
+                        current_date,
+                        is_stat_holiday=bool(stat_holiday_name),
+                    )
                     detail_rows.append(AttendanceDetailRow(
                         employee_id=attendance.employee_id,
                         employee_name=employee.full_name if employee else attendance.employee_id,
@@ -1261,15 +1416,15 @@ async def get_detailed_attendance_report(
                         check_in=check_in.strftime("%H:%M:%S") if check_in else None,
                         check_out=check_out.strftime("%H:%M:%S") if check_out else None,
                         day_type=day_type,
-                        regular_hours=attendance.get_effective_regular_hours() or 0.0,
-                        ot_hours=attendance.get_effective_ot_hours() or 0.0,
-                        weekend_ot_hours=attendance.get_effective_weekend_ot_hours() or 0.0,
-                        stat_holiday_hours=attendance.get_effective_stat_holiday_hours() or 0.0,
+                        regular_hours=reg_h,
+                        ot_hours=ot_h,
+                        weekend_ot_hours=wot_h,
+                        stat_holiday_hours=stat_h,
                         leave_type=final_leave_type,
                         stat_holiday_name=final_stat_holiday,
                     ))
                 else:
-                    # Calculate regular hours for paid leave (matching summary report logic)
+                    # Calculate regular hours for paid leave (matching attendance list / summary logic)
                     regular_hours = 0.0
                     leave_type_code = None
                     
@@ -1290,34 +1445,8 @@ async def get_detailed_attendance_report(
                                 if leave_type_code.upper() == "VAC":
                                     regular_hours = 0.0
                                 elif leave_type_code.upper() == "SICK":
-                                    employee_schedule = get_schedule_for_date(filter_employee_id, current_date)
-                                    scheduled_hours = 0.0
-                                    is_working_day = False
-                                    if employee_schedule and employee_schedule.schedule:
-                                        try:
-                                            from models.work_schedule import WorkSchedule
-                                            work_schedule = employee_schedule.schedule
-                                            if isinstance(work_schedule, WorkSchedule) and hasattr(work_schedule, 'get_day_times'):
-                                                day_of_week = current_date.weekday()
-                                                schedule_start, schedule_end = work_schedule.get_day_times(day_of_week)
-                                                if schedule_start and schedule_end:
-                                                    schedule_start_dt = datetime.combine(current_date, schedule_start)
-                                                    schedule_end_dt = datetime.combine(current_date, schedule_end)
-                                                    if schedule_end < schedule_start:
-                                                        schedule_end_dt += timedelta(days=1)
-                                                    scheduled_seconds = (schedule_end_dt - schedule_start_dt).total_seconds()
-                                                    scheduled_hours = scheduled_seconds / 3600.0
-                                                    is_working_day = True
-                                        except (AttributeError, TypeError):
-                                            pass
-                                    
-                                    if is_working_day:
-                                        regular_hours = scheduled_hours
-                                    else:
-                                        if scheduled_hours > 0:
-                                            regular_hours = scheduled_hours
-                                        else:
-                                            regular_hours = 8.0  # Default for paid sick leave
+                                    scheduled_hours = _scheduled_hours_for_date(filter_employee_id, current_date)
+                                    regular_hours = scheduled_hours if scheduled_hours > 0 else 8.0
                     
                     # Calculate stat holiday hours if applicable
                     stat_holiday_hours = 0.0
@@ -1326,8 +1455,16 @@ async def get_detailed_attendance_report(
                             filter_employee_id, current_date, start_date, end_date, company_id
                         )
                     
-                    # Only create a row if there are regular hours or stat holiday hours (matching summary report logic)
-                    if regular_hours > 0 or stat_holiday_hours > 0:
+                    # Include days with no punches when they are leave, weekend, or holiday
+                    # (unpaid leave and off weekends were previously dropped because hours == 0)
+                    is_weekend = current_date.weekday() >= 5
+                    if (
+                        regular_hours > 0
+                        or stat_holiday_hours > 0
+                        or leave is not None
+                        or is_weekend
+                        or bool(stat_holiday_name)
+                    ):
                         employee = get_employee(filter_employee_id)
                         detail_rows.append(AttendanceDetailRow(
                             employee_id=filter_employee_id,
@@ -1346,7 +1483,7 @@ async def get_detailed_attendance_report(
                 
                 current_date += timedelta(days=1)
         else:
-            # All employees: get existing attendance records
+            # All employees: expand every calendar day (attendance, leave, weekends, holidays)
             from models.base import SessionLocal
             
             records = list_attendance(
@@ -1372,40 +1509,66 @@ async def get_detailed_attendance_report(
             # Ensure we have at least one company to check
             companies_to_check = company_ids if company_ids else (set([company_id]) if company_id else set())
             
-            # Get ALL employees for the company(ies) in the date range (not just those with attendance)
-            all_employee_ids = set(employee_ids_from_attendance)  # Start with employees who have attendance
-            if companies_to_check:
-                from models.employment import Employment
-                from sqlalchemy import distinct, or_
-                with SessionLocal() as session:
-                    # Get all employees who have employment in the date range for these companies
-                    employment_results = session.execute(
-                        select(distinct(Employment.employee_id))
-                        .where(
-                            and_(
-                                Employment.company_id.in_(list(companies_to_check)),
-                                Employment.start_date <= end_date,
-                                or_(
-                                    Employment.end_date >= start_date,
-                                    Employment.end_date == None
+            # Eligible staff for this period (hire date + termination last_working_date)
+            if company_id:
+                all_employee_ids = list_employee_ids_for_period(company_id, start_date, end_date)
+            else:
+                # No company filter: start from attendance, then drop terminated/not-yet-hired
+                all_employee_ids = filter_employee_ids_active_in_period(
+                    employee_ids_from_attendance, start_date, end_date
+                )
+                if companies_to_check:
+                    from models.employment import Employment
+                    from sqlalchemy import distinct, or_
+                    with SessionLocal() as session:
+                        employment_results = session.execute(
+                            select(distinct(Employment.employee_id))
+                            .where(
+                                and_(
+                                    Employment.company_id.in_(list(companies_to_check)),
+                                    Employment.start_date <= end_date,
+                                    or_(
+                                        Employment.end_date >= start_date,
+                                        Employment.end_date == None
+                                    )
                                 )
                             )
+                        ).scalars().all()
+                    all_employee_ids.update(
+                        filter_employee_ids_active_in_period(
+                            set(emp_id for emp_id in employment_results if emp_id),
+                            start_date,
+                            end_date,
                         )
-                    ).scalars().all()
-                    all_employee_ids.update(emp_id for emp_id in employment_results if emp_id)
+                    )
+            
+            # Drop any attendance-only IDs that are not eligible for this period
+            employee_ids_from_attendance = {
+                emp_id for emp_id in employee_ids_from_attendance if emp_id in all_employee_ids
+            }
+            records = [r for r in records if r.employee_id in all_employee_ids]
             
             # Get leave records for ALL employees (not just those with attendance)
+            # Exclude weekends/stat holidays so leave day count matches Leave History
             all_leaves = {}
             for emp_id in all_employee_ids:
                 leaves = get_leaves_in_range(emp_id, start_date, end_date)
+                employment = get_current_employment(emp_id, start_date)
+                emp_company_id = employment.company_id if employment else (
+                    next(iter(companies_to_check), None) if companies_to_check else company_id
+                )
                 for leave in leaves:
-                    leave_date = leave.start_date
-                    while leave_date <= leave.end_date:
-                        if start_date <= leave_date <= end_date:
-                            key = (emp_id, leave_date)
-                            if key not in all_leaves:
-                                all_leaves[key] = leave
-                        leave_date += timedelta(days=1)
+                    for leave_date in iter_leave_chargeable_dates(
+                        leave.start_date,
+                        leave.end_date,
+                        company_id=emp_company_id,
+                        employee_id=emp_id,
+                        range_start=start_date,
+                        range_end=end_date,
+                    ):
+                        key = (emp_id, leave_date)
+                        if key not in all_leaves:
+                            all_leaves[key] = leave
             
             # Get holiday names for all companies
             holiday_names = {}
@@ -1451,60 +1614,138 @@ async def get_detailed_attendance_report(
                             if holiday.holiday_date not in holiday_names:
                                 holiday_names[holiday.holiday_date] = holiday.name
             
-            # Sort by employee_id and date
-            records.sort(key=lambda r: (r.employee_id, r.date))
-            
-            # Build detailed report rows
+            attendance_by_emp_date = {
+                (record.employee_id, record.date): record for record in records
+            }
+
+            # Report employees who punched or took leave in the period (eligible set only)
+            employees_to_report = {
+                emp_id for emp_id in employee_ids_from_attendance if emp_id in all_employee_ids
+            }
+            employees_to_report.update(
+                emp_id for emp_id, _ in all_leaves.keys() if emp_id in all_employee_ids
+            )
+
+            active_bounds = get_employee_active_bounds_map(employees_to_report)
+            leave_type_name_cache: dict = {}
             detail_rows = []
-            for record in records:
-                employee = get_employee(record.employee_id)
-                
-                # Determine day type (Weekday or Weekend)
-                day_type = "Weekend" if record.date.weekday() >= 5 else "Weekday"
-                
-                # Get effective check-in/check-out times (display full time with seconds, no rounding)
-                check_in = record.get_effective_check_in()
-                check_out = record.get_effective_check_out()
-                
-                # Get leave information for this employee and date
-                leave_type_name = None
-                leave_key = (record.employee_id, record.date)
-                if leave_key in all_leaves:
-                    leave = all_leaves[leave_key]
-                    with SessionLocal() as session:
-                        from models.leave_type import LeaveType
-                        leave_type_obj = session.get(LeaveType, leave.leave_type_id)
-                        if leave_type_obj:
-                            leave_type_name = leave_type_obj.name
-                
-                # Get holiday information for this date
-                stat_holiday_name = holiday_names.get(record.date)
-                
-                # Append remarks to leave/stat holiday display
-                display_leave_type = leave_type_name
-                display_stat_holiday = stat_holiday_name
-                if record.remarks:
-                    if display_leave_type:
-                        display_leave_type = f"{display_leave_type} - {record.remarks}"
-                    elif display_stat_holiday:
-                        display_stat_holiday = f"{display_stat_holiday} - {record.remarks}"
-                    elif not display_leave_type and not display_stat_holiday:
-                        # If no leave or holiday, remarks goes in leave column
-                        display_leave_type = record.remarks
-                
-                detail_rows.append(AttendanceDetailRow(
-                    employee_id=record.employee_id,
-                    employee_name=employee.full_name if employee else record.employee_id,
-                    date=record.date.isoformat(),
-                    check_in=check_in.strftime("%H:%M:%S") if check_in else None,
-                    check_out=check_out.strftime("%H:%M:%S") if check_out else None,
-                    day_type=day_type,
-                    regular_hours=record.get_effective_regular_hours() or 0.0,
-                    ot_hours=record.get_effective_ot_hours() or 0.0,
-                    weekend_ot_hours=record.get_effective_weekend_ot_hours() or 0.0,
-                    leave_type=display_leave_type,
-                    stat_holiday_name=display_stat_holiday,
-                ))
+
+            for emp_id in sorted(employees_to_report):
+                employee = get_employee(emp_id)
+                emp_name = employee.full_name if employee else emp_id
+                emp_company = company_id
+                if not emp_company:
+                    employment = get_current_employment(emp_id, start_date)
+                    if employment:
+                        emp_company = employment.company_id
+
+                active_from, active_to = active_bounds.get(emp_id, (None, None))
+                current_date = start_date
+                while current_date <= end_date:
+                    # Skip days outside hire / last working date
+                    if active_from and current_date < active_from:
+                        current_date += timedelta(days=1)
+                        continue
+                    if active_to and current_date > active_to:
+                        current_date += timedelta(days=1)
+                        continue
+
+                    attendance = attendance_by_emp_date.get((emp_id, current_date))
+                    leave = all_leaves.get((emp_id, current_date))
+                    leave_type_name = None
+                    leave_type_code = None
+                    if leave:
+                        cached = leave_type_name_cache.get(leave.leave_type_id)
+                        if cached is None:
+                            with SessionLocal() as session:
+                                from models.leave_type import LeaveType
+                                leave_type_obj = session.get(LeaveType, leave.leave_type_id)
+                                if leave_type_obj:
+                                    cached = (leave_type_obj.name, leave_type_obj.code)
+                                else:
+                                    cached = (None, None)
+                                leave_type_name_cache[leave.leave_type_id] = cached
+                        leave_type_name, leave_type_code = cached
+
+                    stat_holiday_name = holiday_names.get(current_date)
+                    day_type = current_date.strftime("%A")
+                    is_weekend = current_date.weekday() >= 5
+
+                    if attendance:
+                        check_in = attendance.get_effective_check_in()
+                        check_out = attendance.get_effective_check_out()
+
+                        display_leave_type = leave_type_name
+                        display_stat_holiday = stat_holiday_name
+                        if attendance.remarks:
+                            if display_leave_type:
+                                display_leave_type = f"{display_leave_type} - {attendance.remarks}"
+                            elif display_stat_holiday:
+                                display_stat_holiday = f"{display_stat_holiday} - {attendance.remarks}"
+                            elif not display_leave_type and not display_stat_holiday:
+                                display_leave_type = attendance.remarks
+
+                        # Match attendance list display hours (incl. paid sick leave fill-in)
+                        reg_h, ot_h, wot_h, stat_h = _display_hours_matching_attendance_list(
+                            attendance,
+                            leave,
+                            emp_id,
+                            current_date,
+                            is_stat_holiday=bool(stat_holiday_name),
+                        )
+                        detail_rows.append(AttendanceDetailRow(
+                            employee_id=emp_id,
+                            employee_name=emp_name,
+                            date=current_date.isoformat(),
+                            check_in=check_in.strftime("%H:%M:%S") if check_in else None,
+                            check_out=check_out.strftime("%H:%M:%S") if check_out else None,
+                            day_type=day_type,
+                            regular_hours=reg_h,
+                            ot_hours=ot_h,
+                            weekend_ot_hours=wot_h,
+                            stat_holiday_hours=stat_h,
+                            leave_type=display_leave_type,
+                            stat_holiday_name=display_stat_holiday,
+                        ))
+                    else:
+                        regular_hours = 0.0
+                        if leave and leave_type_code:
+                            code = leave_type_code.upper()
+                            if code == "VAC":
+                                regular_hours = 0.0
+                            elif code == "SICK":
+                                scheduled_hours = _scheduled_hours_for_date(emp_id, current_date)
+                                regular_hours = scheduled_hours if scheduled_hours > 0 else 8.0
+
+                        stat_holiday_hours = 0.0
+                        if stat_holiday_name and emp_company:
+                            stat_holiday_hours = calculate_stat_holiday_entitlement(
+                                emp_id, current_date, start_date, end_date, emp_company
+                            )
+
+                        if (
+                            regular_hours > 0
+                            or stat_holiday_hours > 0
+                            or leave is not None
+                            or is_weekend
+                            or bool(stat_holiday_name)
+                        ):
+                            detail_rows.append(AttendanceDetailRow(
+                                employee_id=emp_id,
+                                employee_name=emp_name,
+                                date=current_date.isoformat(),
+                                check_in=None,
+                                check_out=None,
+                                day_type=day_type,
+                                regular_hours=regular_hours,
+                                ot_hours=0.0,
+                                weekend_ot_hours=0.0,
+                                stat_holiday_hours=stat_holiday_hours,
+                                leave_type=leave_type_name,
+                                stat_holiday_name=stat_holiday_name,
+                            ))
+
+                    current_date += timedelta(days=1)
         
         company_name = None
         if company_id:
@@ -1581,6 +1822,25 @@ async def get_attendance_report(
         if filter_employee_id:
             # For single employee, use the same logic as list_attendance_records to include leave days
             from models.base import SessionLocal
+
+            # Skip employees terminated before / hired after the period
+            if not filter_employee_ids_active_in_period({filter_employee_id}, start_date, end_date):
+                company_name = None
+                if company_id:
+                    company = get_company_by_id(company_id)
+                    company_name = company.legal_name if company else None
+                return AttendanceReportResponse(
+                    success=True,
+                    company_id=company_id,
+                    company_name=company_name,
+                    start_date=start_date.isoformat(),
+                    end_date=end_date.isoformat(),
+                    summary=[],
+                    total_regular_hours=0.0,
+                    total_ot_hours=0.0,
+                    total_weekend_ot_hours=0.0,
+                    total_stat_holiday_hours=0.0,
+                )
             
             # Get company_id from employee's employment if not provided
             if not company_id:
@@ -1596,11 +1856,14 @@ async def get_attendance_report(
             leaves = get_leaves_in_range(filter_employee_id, start_date, end_date)
             leave_map = {}
             for leave in leaves:
-                leave_date = leave.start_date
-                while leave_date <= leave.end_date:
-                    if start_date <= leave_date <= end_date:
-                        leave_map[leave_date] = leave
-                    leave_date += timedelta(days=1)
+                for leave_date in iter_leave_chargeable_dates(
+                    leave.start_date,
+                    leave.end_date,
+                    holiday_dates=holiday_dates,
+                    range_start=start_date,
+                    range_end=end_date,
+                ):
+                    leave_map[leave_date] = leave
             
             # Get existing attendance records
             existing_attendance = list_attendance(
@@ -1610,11 +1873,21 @@ async def get_attendance_report(
                 company_id=company_id,
             )
             attendance_map = {record.date: record for record in existing_attendance}
+            active_from, active_to = get_employee_active_bounds_map({filter_employee_id}).get(
+                filter_employee_id, (None, None)
+            )
             
             # Generate all dates in the pay period and build records
             records = []
             current_date = start_date
             while current_date <= end_date:
+                if active_from and current_date < active_from:
+                    current_date += timedelta(days=1)
+                    continue
+                if active_to and current_date > active_to:
+                    current_date += timedelta(days=1)
+                    continue
+
                 attendance = attendance_map.get(current_date)
                 leave = leave_map.get(current_date)
                 is_stat_holiday = current_date in holiday_dates
@@ -1656,7 +1929,8 @@ async def get_attendance_report(
                     regular_hours = attendance.get_effective_regular_hours() or 0.0
                     
                     # Check for sick leave even if regular hours exist (handles attendance records with regular_hours set)
-                    if not attendance.check_in and not attendance.check_out:
+                    # Do not pay sick leave hours on a statutory holiday
+                    if not attendance.check_in and not attendance.check_out and not is_stat_holiday:
                         has_override = attendance.override_regular_hours is not None
                         if leave and leave_type_code and leave_type_code.upper() == "SICK":
                             # Sick leave is paid, use scheduled hours OR existing regular hours
@@ -1671,7 +1945,7 @@ async def get_attendance_report(
                         elif has_override:
                             # Use override value
                             regular_hours = attendance.override_regular_hours
-                elif leave and leave_type_code:
+                elif leave and leave_type_code and not is_stat_holiday:
                     # Check if it's a paid leave type (Sick Leave or Vacation)
                     # Vacation days should show 0.00 regular hours
                     if leave_type_code.upper() == "VAC":
@@ -1726,7 +2000,27 @@ async def get_attendance_report(
                 start_date=start_date,
                 end_date=end_date,
             )
+            # Exclude staff terminated before the period (or hired after it)
+            if company_id:
+                eligible_ids = list_employee_ids_for_period(company_id, start_date, end_date)
+            else:
+                eligible_ids = filter_employee_ids_active_in_period(
+                    {r.employee_id for r in records}, start_date, end_date
+                )
+            records = [r for r in records if r.employee_id in eligible_ids]
         
+        # Clip records to each employee's hire / last working date
+        active_bounds = get_employee_active_bounds_map({r.employee_id for r in records})
+        clipped_records = []
+        for record in records:
+            active_from, active_to = active_bounds.get(record.employee_id, (None, None))
+            if active_from and record.date < active_from:
+                continue
+            if active_to and record.date > active_to:
+                continue
+            clipped_records.append(record)
+        records = clipped_records
+
         # Group by employee
         employee_summaries = {}
         for record in records:
@@ -2343,7 +2637,7 @@ async def export_attendance_report(
     current_user: dict = Depends(require_permission("attendance:view"))
 ):
     """Export attendance report as Excel or CSV"""
-    from fastapi.responses import StreamingResponse
+    from fastapi.responses import Response
     
     try:
         if not start_date or not end_date:
@@ -2395,26 +2689,26 @@ async def export_attendance_report(
             raise HTTPException(status_code=400, detail="No attendance data found for the specified period")
         
         df = pd.DataFrame(export_data)
+        filename_base = f"attendance_report_{start_date}_{end_date}"
         
         if format.lower() == "csv":
-            output = io.StringIO()
-            df.to_csv(output, index=False)
-            output.seek(0)
-            return StreamingResponse(
-                io.BytesIO(output.getvalue().encode()),
+            content = df.to_csv(index=False).encode("utf-8")
+            return Response(
+                content=content,
                 media_type="text/csv",
-                headers={"Content-Disposition": f"attachment; filename=attendance_report_{start_date}_{end_date}.csv"}
+                headers={"Content-Disposition": f'attachment; filename="{filename_base}.csv"'},
             )
         else:
-            # Excel
+            # Use Response with raw bytes — StreamingResponse(BytesIO) iterates as text
+            # lines and corrupts binary Excel files.
             output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='Attendance Report')
-            output.seek(0)
-            return StreamingResponse(
-                output,
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                df.to_excel(writer, index=False, sheet_name="Attendance Report")
+            content = output.getvalue()
+            return Response(
+                content=content,
                 media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": f"attachment; filename=attendance_report_{start_date}_{end_date}.xlsx"}
+                headers={"Content-Disposition": f'attachment; filename="{filename_base}.xlsx"'},
             )
     except HTTPException:
         raise

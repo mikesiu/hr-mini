@@ -267,6 +267,7 @@ class VacationPayLedgerData(BaseModel):
     vacation_taken_days: float = 0.0
     vacation_taken_dates: str = ""
     vacation_balance: float = 0.0
+    vacation_balance_days: float = 0.0
     sick_leave_balance: float = 0.0
     sick_leave_taken_days: float = 0.0
     sick_leave_taken_dates: str = ""

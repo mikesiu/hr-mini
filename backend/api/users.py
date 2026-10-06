@@ -10,6 +10,7 @@ from utils.security import verify_password
 
 router = APIRouter()
 
+@router.get("")
 @router.get("/")
 async def list_users_endpoint(
     current_user: dict = Depends(require_permission("user:view"))
@@ -42,6 +43,7 @@ async def list_roles_endpoint(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching roles: {str(e)}")
 
+@router.post("")
 @router.post("/")
 async def create_user_endpoint(
     user_data: dict,

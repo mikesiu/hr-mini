@@ -21,6 +21,7 @@ import {
   GetApp as DownloadIcon,
   Refresh as RefreshIcon,
   Assessment as AssessmentIcon,
+  Person as PersonIcon,
 } from '@mui/icons-material';
 import { ReportSummary, GroupedReportData, ReportFilters as FilterValues } from '../../types/reports';
 import { useCompanyFilter } from '../../contexts/CompanyFilterContext';
@@ -32,6 +33,8 @@ interface ReportPreviewProps {
   summary: ReportSummary;
   loading?: boolean;
   onPrint?: () => void;
+  /** Vacation pay ledger only: download one PDF per employee */
+  onPrintIndividual?: () => void | Promise<void>;
   onExport?: (format: string) => void;
   onRefresh?: () => void;
   isGrouped?: boolean;
@@ -51,6 +54,7 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
   summary,
   loading = false,
   onPrint,
+  onPrintIndividual,
   onExport,
   onRefresh,
   isGrouped = false,
@@ -168,8 +172,8 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
       case 'vacation_pay_ledger':
         return [
           'Employee', 'Payroll Date', 'Gross', 'Benefits', 'Vac Paid',
-          'Vac %', 'Vac Earned', 'Vac Taken', 'Vac Dates', 'Vac Balance $',
-          'Sick Pay', 'Sick Bal', 'Sick Taken', 'Sick Dates',
+          'Vac %', 'Vac Earned', 'Vac Balance $', 'Vac Taken', 'Vac Dates',
+          'Vac Balance Days', 'Sick Taken', 'Sick Dates', 'Sick Bal',
         ];
       case 'work_permit_status':
         return ['Employee', 'Permit Type', 'Expiry Date', 'Days Until Expiry', 'Status'];
@@ -293,13 +297,13 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
           formatCurrency(record.vacation_paid),
           record.vacation_percent != null ? `${record.vacation_percent}%` : '',
           formatCurrency(record.vacation_amount_earned),
+          formatCurrency(record.vacation_balance),
           `${record.vacation_taken_days ?? 0}`,
           record.vacation_taken_dates || '',
-          formatCurrency(record.vacation_balance),
-          formatCurrency(record.sick_pay),
-          record.sick_leave_balance ?? 0,
+          record.vacation_balance_days ?? 0,
           `${record.sick_leave_taken_days ?? 0}`,
           record.sick_leave_taken_dates || '',
+          record.sick_leave_balance ?? 0,
         ];
       case 'work_permit_status':
         return [
@@ -915,6 +919,14 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
             <Tooltip title="Print Report">
               <IconButton onClick={onPrint}>
                 <PrintIcon />
+              </IconButton>
+            </Tooltip>
+          )}
+
+          {onPrintIndividual && reportType === 'vacation_pay_ledger' && (
+            <Tooltip title="Download PDF per employee (ZIP if multiple)">
+              <IconButton onClick={onPrintIndividual} color="primary">
+                <PersonIcon />
               </IconButton>
             </Tooltip>
           )}

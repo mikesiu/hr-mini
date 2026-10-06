@@ -209,6 +209,64 @@ def update_employee_schedule(
         return employee_schedule
 
 
+def end_open_schedules(
+    employee_id: str,
+    end_date: date,
+    *,
+    performed_by: str | None = None,
+    session=None,
+) -> int:
+    """
+    Set end_date on open or overlapping schedule assignments for an employee.
+    Does not shorten assignments that already end on or before end_date.
+    Returns the number of assignments updated.
+    """
+    owns_session = session is None
+    if owns_session:
+        session = SessionLocal()
+
+    try:
+        assignments = list(session.execute(
+            select(EmployeeSchedule).where(
+                and_(
+                    EmployeeSchedule.employee_id == employee_id,
+                    or_(
+                        EmployeeSchedule.end_date.is_(None),
+                        EmployeeSchedule.end_date > end_date,
+                    ),
+                    EmployeeSchedule.effective_date <= end_date,
+                )
+            )
+        ).scalars().all())
+
+        updated = 0
+        for assignment in assignments:
+            before = model_to_dict(assignment)
+            assignment.end_date = end_date
+            updated += 1
+            if owns_session:
+                session.flush()
+            log_action(
+                entity="employee_schedule",
+                entity_id=assignment.id,
+                action="update",
+                changed_by=performed_by,
+                before=before,
+                after=model_to_dict(assignment),
+            )
+
+        if owns_session and updated:
+            session.commit()
+        return updated
+    except Exception:
+        if owns_session:
+            session.rollback()
+        raise
+    finally:
+        if owns_session:
+            session.close()
+
+
 def remove_employee_schedule(employee_schedule_id: int, *, performed_by: str | None = None) -> bool:
     """Remove an employee schedule assignment"""
     with SessionLocal() as session:

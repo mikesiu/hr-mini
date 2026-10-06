@@ -31,6 +31,10 @@ def add_leave_types():
             "name": "Bereavement Leave",
         },
         {
+            "code": "FUNERAL",
+            "name": "Funeral Leave",
+        },
+        {
             "code": "MATERNITY",
             "name": "Maternity Leave",
         },

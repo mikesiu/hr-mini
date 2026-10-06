@@ -140,7 +140,7 @@ const WorkPermitPage: React.FC = () => {
   const [editingPermit, setEditingPermit] = useState<WorkPermit | null>(null);
   const [formData, setFormData] = useState({
     permit_type: '',
-    expiry_date: new Date(),
+    expiry_date: '',
   });
 
   // Dialog state
@@ -301,8 +301,13 @@ const WorkPermitPage: React.FC = () => {
   const handleSubmit = async () => {
     if (!selectedEmployee) return;
 
-    // Validate expiry date
-    if (!formData.expiry_date || isNaN(formData.expiry_date.getTime())) {
+    // Validate YYYY-MM-DD from the native date input (keep as string to avoid year typing bugs)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(formData.expiry_date)) {
+      setError('Please select a valid expiry date');
+      return;
+    }
+    const [year, month, day] = formData.expiry_date.split('-').map(Number);
+    if (year < 1900 || year > 2200 || month < 1 || month > 12 || day < 1 || day > 31) {
       setError('Please select a valid expiry date');
       return;
     }
@@ -311,22 +316,10 @@ const WorkPermitPage: React.FC = () => {
       setLoading(true);
       setError(null);
 
-      // Format date safely to avoid timezone issues
-      const formatDateForAPI = (date: Date): string => {
-        if (!date || isNaN(date.getTime())) {
-          throw new Error('Invalid date');
-        }
-        // Use local date components to avoid timezone conversion
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      };
-
       const permitData = {
         employee_id: selectedEmployee,
         permit_type: formData.permit_type,
-        expiry_date: formatDateForAPI(formData.expiry_date),
+        expiry_date: formData.expiry_date,
       };
 
       if (editingPermit) {
@@ -339,7 +332,7 @@ const WorkPermitPage: React.FC = () => {
 
       setPermitDialogOpen(false);
       setEditingPermit(null);
-      setFormData({ permit_type: '', expiry_date: new Date() });
+      setFormData({ permit_type: '', expiry_date: '' });
       loadWorkPermits();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to save work permit');
@@ -371,33 +364,12 @@ const WorkPermitPage: React.FC = () => {
   // Handle edit
   const handleEdit = (permit: WorkPermit) => {
     setEditingPermit(permit);
-    // Parse date string safely to avoid timezone issues
-    const parseDateString = (dateStr: string): Date => {
-      if (!dateStr) return new Date();
-      // If it's already in YYYY-MM-DD format, parse directly
-      if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-        const [year, month, day] = dateStr.split('-').map(Number);
-        return new Date(year, month - 1, day);
-      }
-      // Otherwise, try parsing as Date but use local components
-      try {
-        const date = new Date(dateStr);
-        if (isNaN(date.getTime())) {
-          return new Date();
-        }
-        // Use local date components to avoid timezone shift
-        const year = date.getFullYear();
-        const month = date.getMonth();
-        const day = date.getDate();
-        return new Date(year, month, day);
-      } catch {
-        return new Date();
-      }
-    };
-    
+    // Keep as YYYY-MM-DD string — do not convert through Date while editing
+    const raw = permit.expiry_date || '';
+    const dateStr = raw.includes('T') ? raw.split('T')[0] : raw.slice(0, 10);
     setFormData({
       permit_type: permit.permit_type,
-      expiry_date: parseDateString(permit.expiry_date),
+      expiry_date: /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : '',
     });
     setPermitDialogOpen(true);
   };
@@ -405,9 +377,14 @@ const WorkPermitPage: React.FC = () => {
   // Handle add new
   const handleAddNew = () => {
     setEditingPermit(null);
+    const oneYear = new Date();
+    oneYear.setFullYear(oneYear.getFullYear() + 1);
+    const year = oneYear.getFullYear();
+    const month = String(oneYear.getMonth() + 1).padStart(2, '0');
+    const day = String(oneYear.getDate()).padStart(2, '0');
     setFormData({
       permit_type: '',
-      expiry_date: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year from now
+      expiry_date: `${year}-${month}-${day}`,
     });
     setPermitDialogOpen(true);
   };
@@ -790,27 +767,14 @@ const WorkPermitPage: React.FC = () => {
               <TextField
                 label="Expiry Date"
                 type="date"
-                value={formData.expiry_date && !isNaN(formData.expiry_date.getTime()) 
-                  ? (() => {
-                      // Format date safely for input field (YYYY-MM-DD)
-                      const year = formData.expiry_date.getFullYear();
-                      const month = String(formData.expiry_date.getMonth() + 1).padStart(2, '0');
-                      const day = String(formData.expiry_date.getDate()).padStart(2, '0');
-                      return `${year}-${month}-${day}`;
-                    })()
-                  : ''}
+                value={formData.expiry_date}
                 onChange={(e) => {
-                  const dateValue = e.target.value;
-                  if (dateValue) {
-                    // Parse date string directly to avoid timezone issues
-                    const [year, month, day] = dateValue.split('-').map(Number);
-                    const date = new Date(year, month - 1, day);
-                    setFormData({ ...formData, expiry_date: date });
-                  } else {
-                    setFormData({ ...formData, expiry_date: new Date() });
-                  }
+                  // Keep raw YYYY-MM-DD string. Converting through Date() while typing
+                  // maps years 0-99 to 19xx (e.g. 7 -> 1907) when entering 2027.
+                  setFormData({ ...formData, expiry_date: e.target.value });
                 }}
                 InputLabelProps={{ shrink: true }}
+                inputProps={{ min: '1900-01-01', max: '2200-12-31' }}
                 fullWidth
               />
             </Box>

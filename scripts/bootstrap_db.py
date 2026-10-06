@@ -101,6 +101,7 @@ def seed_leave_types(session: Session) -> None:
             LeaveType(code="VAC", name="Vacation"),
             LeaveType(code="SICK", name="Sick Leave"),
             LeaveType(code="BL", name="Bereavement Leave"),
+            LeaveType(code="FUNERAL", name="Funeral Leave"),
             LeaveType(code="CCL", name="Compassionate Care Leave"),
             LeaveType(code="CIIL", name="Critical Illness or Injury Leave"),
             LeaveType(code="FRL", name="Family Responsibility Leave"),

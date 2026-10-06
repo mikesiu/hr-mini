@@ -53,6 +53,48 @@ def calculate_working_days(
     return working_days
 
 
+def iter_leave_chargeable_dates(
+    start_date: date,
+    end_date: date,
+    *,
+    company_id: str | None = None,
+    employee_id: str | None = None,
+    holiday_dates: set[date] | None = None,
+    range_start: date | None = None,
+    range_end: date | None = None,
+) -> list[date]:
+    """
+    Return dates in a leave span that count as leave days.
+
+    Matches leave day calculation: weekends and statutory holidays are excluded.
+    Optionally clip to [range_start, range_end] (e.g. a pay period window).
+    """
+    if start_date > end_date:
+        return []
+
+    holidays = set(holiday_dates) if holiday_dates is not None else set()
+    if holiday_dates is None and company_id:
+        holidays = set(get_holidays_in_range(
+            company_id,
+            start_date,
+            end_date,
+            employee_id,
+        ))
+
+    clip_start = range_start or start_date
+    clip_end = range_end or end_date
+    current = max(start_date, clip_start)
+    last = min(end_date, clip_end)
+
+    chargeable: list[date] = []
+    while current <= last:
+        is_weekend = current.weekday() >= 5
+        if not is_weekend and current not in holidays:
+            chargeable.append(current)
+        current += timedelta(days=1)
+    return chargeable
+
+
 def calculate_leave_days_for_employee(
     employee_id: str,
     start_date: date,

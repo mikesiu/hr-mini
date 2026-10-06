@@ -590,8 +590,22 @@ class ReportService:
                 try:
                     # Calculate vacation balance - use seniority_start_date if available, otherwise hire_date
                     seniority_date = employee.seniority_start_date if hasattr(employee, 'seniority_start_date') and employee.seniority_start_date else employee.hire_date
-                    vacation_entitlement = calculate_vacation_entitlement(seniority_date, today) if seniority_date else 0.0
-                    vacation_remaining = get_vacation_remaining(employee.id, seniority_date, today) if seniority_date else 0.0
+                    company_id = filters.company_id
+                    vacation_entitlement = (
+                        calculate_vacation_entitlement(
+                            seniority_date,
+                            today,
+                            employee=employee,
+                            company_id=company_id,
+                        )
+                        if seniority_date
+                        else 0.0
+                    )
+                    vacation_remaining = (
+                        get_vacation_remaining(employee.id, seniority_date, today, company_id=company_id)
+                        if seniority_date
+                        else 0.0
+                    )
                     vacation_taken = vacation_entitlement - vacation_remaining if vacation_entitlement >= vacation_remaining else 0.0
                     
                     # Calculate sick leave balance
@@ -1379,7 +1393,7 @@ class ReportService:
         from repos.company_repo import get_company_by_id
         from models.base import SessionLocal
         from models.leave_type import LeaveType
-        from services.leave_service import get_sick_remaining
+        from services.leave_service import get_sick_remaining, vacation_balance_days_as_of
         from services.leave_pay_helpers import (
             leave_days_overlapping,
             format_leave_dates,
@@ -1464,6 +1478,8 @@ class ReportService:
 
                 vac_leaves = [lv for lv, code in typed if code == "VAC"]
                 sick_leaves = [lv for lv, code in typed if code == "SICK"]
+                # Each vacation leave is shown on only the first overlapping pay period.
+                vac_shown_ids = set()
 
                 rows_sorted = sorted(rows, key=lambda r: (r.pay_date, r.cheque_no or ""))
                 for row in rows_sorted:
@@ -1488,16 +1504,20 @@ class ReportService:
                     win_start = period_start or row.pay_date
                     win_end = period_end or row.pay_date
 
-                    # Vacation taken in window
+                    # Vacation taken: full days + full date range, once per leave (first period).
                     vac_in = []
                     vac_days = 0.0
                     for lv in vac_leaves:
-                        d = leave_days_overlapping(
+                        lv_id = getattr(lv, "id", None) or id(lv)
+                        if lv_id in vac_shown_ids:
+                            continue
+                        overlap = leave_days_overlapping(
                             lv.start_date, lv.end_date, lv.days, win_start, win_end, filters.company_id
                         )
-                        if d > 0:
+                        if overlap > 0:
                             vac_in.append(lv)
-                            vac_days += d
+                            vac_days += float(lv.days or 0)
+                            vac_shown_ids.add(lv_id)
 
                     sick_days, sick_pay, sick_dates = sick_pay_for_period(
                         employee_id, sick_leaves, win_start, win_end, filters.company_id
@@ -1530,6 +1550,21 @@ class ReportService:
                     else:
                         sick_balance = 0.0
 
+                    seniority = (
+                        getattr(employee, "seniority_start_date", None)
+                        or getattr(employee, "hire_date", None)
+                    )
+                    # Point-in-time vac day balance (same rules as leave dashboard).
+                    vac_balance_days = vacation_balance_days_as_of(
+                        employee_id,
+                        seniority,
+                        win_end,
+                        vac_leaves,
+                        employee=employee,
+                        company_id=filters.company_id,
+                        vacation_percent=pct_f,
+                    )
+
                     report_data.append(
                         VacationPayLedgerData(
                             employee_id=employee_id,
@@ -1548,6 +1583,7 @@ class ReportService:
                             vacation_taken_days=vac_days,
                             vacation_taken_dates=format_leave_dates(vac_in),
                             vacation_balance=float(running),
+                            vacation_balance_days=vac_balance_days,
                             sick_leave_balance=sick_balance,
                             sick_leave_taken_days=sick_days,
                             sick_leave_taken_dates=sick_dates,

@@ -103,11 +103,44 @@ app.include_router(work_schedules.router, prefix="/api/work-schedules", tags=["W
 app.include_router(attendance.router, prefix="/api/attendance", tags=["Attendance"])
 print("All routes registered successfully!")
 
-# Development mode - just serve API
-@app.get("/")
-async def root():
-    return {"message": "HR Mini API - Development mode"}
+# Serve the React production build when present (single-server / desktop mode).
+from app_paths import frontend_build_dir
+
+_FRONTEND_BUILD = frontend_build_dir()
+_INDEX_HTML = _FRONTEND_BUILD / "index.html"
+_HAS_FRONTEND = _INDEX_HTML.is_file()
+
+if _HAS_FRONTEND:
+    _static_dir = _FRONTEND_BUILD / "static"
+    if _static_dir.is_dir():
+        app.mount("/static", StaticFiles(directory=str(_static_dir)), name="frontend-static")
+    print(f"Serving frontend from: {_FRONTEND_BUILD}")
+
+    @app.get("/")
+    async def root():
+        return FileResponse(_INDEX_HTML)
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        # API routes are registered above; this only catches non-API paths.
+        if full_path.startswith("api/") or full_path == "api":
+            raise HTTPException(status_code=404, detail="Not found")
+        candidate = (_FRONTEND_BUILD / full_path).resolve()
+        try:
+            candidate.relative_to(_FRONTEND_BUILD.resolve())
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Not found")
+        if candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(_INDEX_HTML)
+else:
+    @app.get("/")
+    async def root():
+        return {
+            "message": "HR Mini API - Development mode",
+            "hint": "Build the frontend (npm run build) or run scripts/build_exe.bat to serve the UI from this server.",
+        }
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="127.0.0.1", port=8888)

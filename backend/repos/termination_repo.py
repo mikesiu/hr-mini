@@ -8,6 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from models.base import SessionLocal
 from models.termination import Termination
 from models.employee import Employee
+from repos.employee_schedule_repo import end_open_schedules
+from repos.employment_repo import end_current_employment
 from services.audit_service import log_action
 from utils.serialization import model_to_dict
 
@@ -24,10 +26,12 @@ def create_termination(
     created_by: str | None = None,
     performed_by: str | None = None,
 ) -> Termination:
-    """Create a new termination record and update employee status to Terminated"""
+    """Create a new termination record and update employee status to Terminated.
+    
+    Also ends open work-schedule assignments and current employment as of last_working_date.
+    """
     
     with SessionLocal() as session:
-        # First, update the employee status to Terminated
         employee = session.get(Employee, employee_id)
         if not employee:
             raise ValueError(f"Employee with ID '{employee_id}' not found")
@@ -35,7 +39,8 @@ def create_termination(
         if employee.status == "Terminated":
             raise ValueError(f"Employee {employee_id} is already terminated")
         
-        # Create termination record
+        previous_status = employee.status
+        
         termination = Termination(
             employee_id=employee_id,
             last_working_date=last_working_date,
@@ -48,9 +53,21 @@ def create_termination(
         )
         
         session.add(termination)
-        
-        # Update employee status
         employee.status = "Terminated"
+
+        # End open schedule assignments and current employment as of last working date
+        end_open_schedules(
+            employee_id,
+            last_working_date,
+            performed_by=performed_by,
+            session=session,
+        )
+        end_current_employment(
+            employee_id,
+            last_working_date,
+            performed_by=performed_by,
+            session=session,
+        )
         
         try:
             session.commit()
@@ -60,7 +77,6 @@ def create_termination(
         
         session.refresh(termination)
         
-        # Log the termination action
         log_action(
             entity="termination",
             entity_id=termination.id,
@@ -69,8 +85,6 @@ def create_termination(
             after=model_to_dict(termination),
         )
         
-        # Log the employee status change
-        previous_status = employee.status
         log_action(
             entity="employee",
             entity_id=employee_id,
@@ -103,7 +117,11 @@ def update_termination(
     performed_by: str | None = None, 
     **kwargs
 ) -> Optional[Termination]:
-    """Update termination record"""
+    """Update termination record.
+    
+    If last_working_date changes, also update open schedule assignments and
+    employment end date to match.
+    """
     with SessionLocal() as session:
         termination = session.get(Termination, termination_id)
         if not termination:
@@ -114,8 +132,49 @@ def update_termination(
             return termination
 
         before = model_to_dict(termination)
+        previous_last_working_date = termination.last_working_date
         for key, value in update_data.items():
             setattr(termination, key, value)
+
+        new_last_working_date = termination.last_working_date
+        if (
+            "last_working_date" in update_data
+            and new_last_working_date != previous_last_working_date
+        ):
+            end_open_schedules(
+                termination.employee_id,
+                new_last_working_date,
+                performed_by=performed_by,
+                session=session,
+            )
+            # Update employment end_date if it was set to the previous last working date
+            # or is still open
+            from models.employment import Employment
+            from sqlalchemy import desc, or_
+            employment = session.execute(
+                select(Employment)
+                .where(Employment.employee_id == termination.employee_id)
+                .where(
+                    or_(
+                        Employment.end_date.is_(None),
+                        Employment.end_date == previous_last_working_date,
+                    )
+                )
+                .order_by(desc(Employment.start_date))
+                .limit(1)
+            ).scalar_one_or_none()
+            if employment:
+                emp_before = model_to_dict(employment)
+                employment.end_date = new_last_working_date
+                session.flush()
+                log_action(
+                    entity="employment",
+                    entity_id=employment.id,
+                    action="update",
+                    changed_by=performed_by,
+                    before=emp_before,
+                    after=model_to_dict(employment),
+                )
 
         session.commit()
         session.refresh(termination)
@@ -132,7 +191,10 @@ def update_termination(
 
 
 def delete_termination(termination_id: int, *, performed_by: str | None = None) -> bool:
-    """Delete termination record and restore employee status"""
+    """Delete termination record and restore employee status.
+    
+    Does not clear schedule or employment end dates (manual correction is safer).
+    """
     with SessionLocal() as session:
         termination = session.get(Termination, termination_id)
         if not termination:
@@ -141,10 +203,8 @@ def delete_termination(termination_id: int, *, performed_by: str | None = None) 
         employee_id = termination.employee_id
         before = model_to_dict(termination)
         
-        # Delete termination record
         session.delete(termination)
         
-        # Restore employee status to Active
         employee = session.get(Employee, employee_id)
         if employee:
             employee.status = "Active"
@@ -159,7 +219,6 @@ def delete_termination(termination_id: int, *, performed_by: str | None = None) 
             before=before,
         )
         
-        # Log employee status restoration
         log_action(
             entity="employee",
             entity_id=employee_id,

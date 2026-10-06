@@ -92,6 +92,7 @@ async def get_company(
         raise HTTPException(status_code=500, detail=f"Error fetching company: {str(e)}")
 
 
+@router.post("", response_model=CompanyResponse)
 @router.post("/", response_model=CompanyResponse)
 async def create_company_endpoint(
     company_data: CompanyCreate,

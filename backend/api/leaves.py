@@ -15,16 +15,18 @@ from repos.leave_repo import (
     create_leave as repo_create_leave,
     update_leave as repo_update_leave,
     delete_leave as repo_delete_leave,
-    get_leave_type_by_code
+    get_leave_type_by_code,
+    get_leave as repo_get_leave,
 )
 from repos.employee_repo import get_employee
 from utils.leave_calculation import calculate_leave_days_for_employee, calculate_working_days
 from services.leave_service import (
-    get_vacation_remaining,
-    get_sick_remaining,
+    get_vacation_remaining, 
+    get_sick_remaining, 
     can_approve_leave,
     calculate_vacation_entitlement,
-    vacation_earned_window
+    vacation_earned_window,
+    check_same_day_leave_conflict,
 )
 
 router = APIRouter()
@@ -43,7 +45,12 @@ async def test_upload(file: UploadFile = File(...)):
     return {"message": "File received", "filename": file.filename, "size": file.size}
 
 # Helper functions for leave upload validation
-def validate_leave_upload_row(row_data: dict, row_number: int, leave_type_mapping: dict, existing_leaves: set) -> tuple[bool, Optional[str]]:
+def validate_leave_upload_row(
+    row_data: dict,
+    row_number: int,
+    leave_type_mapping: dict,
+    pending_by_employee: dict,
+) -> tuple[bool, Optional[str]]:
     """Validate a single row of leave data"""
     try:
         # Check required fields
@@ -66,7 +73,7 @@ def validate_leave_upload_row(row_data: dict, row_number: int, leave_type_mappin
         try:
             start_date = pd.to_datetime(row_data['start_date']).date()
             end_date = pd.to_datetime(row_data['end_date']).date()
-        except:
+        except Exception:
             return False, "Invalid date format. Use YYYY-MM-DD"
         
         if start_date > end_date:
@@ -77,13 +84,20 @@ def validate_leave_upload_row(row_data: dict, row_number: int, leave_type_mappin
             days = float(row_data['days'])
             if days <= 0:
                 return False, "Days must be greater than 0"
-        except:
+        except Exception:
             return False, "Invalid days value. Must be a number"
         
-        # Check for duplicates
-        duplicate_key = (employee_id, start_date, end_date)
-        if duplicate_key in existing_leaves:
-            return False, "Duplicate leave record (same employee and dates)"
+        # Same-day rule vs DB + earlier rows in this file
+        pending = pending_by_employee.get(employee_id, [])
+        conflict = check_same_day_leave_conflict(
+            employee_id,
+            start_date,
+            end_date,
+            days,
+            pending_leaves=pending,
+        )
+        if conflict:
+            return False, conflict
         
         # Validate status
         status = str(row_data.get('status', 'Active')).strip()
@@ -95,18 +109,7 @@ def validate_leave_upload_row(row_data: dict, row_number: int, leave_type_mappin
     except Exception as e:
         return False, f"Validation error: {str(e)}"
 
-def get_existing_leaves_set() -> set:
-    """Get set of existing leave records for duplicate checking"""
-    existing_leaves = set()
-    try:
-        leaves = repo_list_leaves()
-        for leave in leaves:
-            key = (leave.employee_id, leave.start_date, leave.end_date)
-            existing_leaves.add(key)
-    except:
-        pass  # If we can't get existing leaves, we'll skip duplicate checking
-    return existing_leaves
-
+@router.get("", response_model=List[LeaveResponse])
 @router.get("/", response_model=List[LeaveResponse])
 async def list_leaves(
     employee_id: Optional[str] = Query(None, description="Filter by employee ID"),
@@ -175,6 +178,7 @@ async def list_leave_types(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching leave types: {str(e)}")
 
+@router.post("", response_model=LeaveResponse)
 @router.post("/", response_model=LeaveResponse)
 async def create_leave_request(
     leave_data: LeaveCreate,
@@ -191,6 +195,15 @@ async def create_leave_request(
         
         if not leave_type:
             raise HTTPException(status_code=400, detail="Invalid leave type ID")
+
+        conflict = check_same_day_leave_conflict(
+            leave_data.employee_id,
+            leave_data.start_date,
+            leave_data.end_date,
+            leave_data.days_requested,
+        )
+        if conflict:
+            raise HTTPException(status_code=400, detail=conflict)
         
         # Create leave using repo
         leave = repo_create_leave(
@@ -236,6 +249,10 @@ async def update_leave_request(
 ):
     """Update a leave request"""
     try:
+        existing = repo_get_leave(leave_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Leave not found")
+
         # Get leave type code if leave_type_id is provided
         leave_type_code = None
         if leave_data.leave_type_id:
@@ -246,6 +263,22 @@ async def update_leave_request(
                     break
             if leave_type:
                 leave_type_code = leave_type.code
+
+        new_start = leave_data.start_date if leave_data.start_date is not None else existing.start_date
+        new_end = leave_data.end_date if leave_data.end_date is not None else existing.end_date
+        new_days = leave_data.days_requested if leave_data.days_requested is not None else float(existing.days or 0)
+        new_status = leave_data.status if leave_data.status is not None else existing.status
+
+        if new_status != "Cancelled":
+            conflict = check_same_day_leave_conflict(
+                existing.employee_id,
+                new_start,
+                new_end,
+                new_days,
+                exclude_leave_id=leave_id,
+            )
+            if conflict:
+                raise HTTPException(status_code=400, detail=conflict)
         
         # Update leave using repo
         updated_leave = repo_update_leave(
@@ -325,7 +358,12 @@ async def get_leave_balance(
         vacation_expiry_date = None
         
         if seniority_date:
-            vacation_entitlement = calculate_vacation_entitlement(seniority_date, today)
+            vacation_entitlement = calculate_vacation_entitlement(
+                seniority_date,
+                today,
+                employee_id=employee_id,
+                employee=employee,
+            )
             if vacation_entitlement > 0:
                 vacation_earned_date, vacation_expiry_date = vacation_earned_window(seniority_date, today)
         
@@ -527,8 +565,8 @@ async def preview_leave_upload(
         leave_types = repo_list_leave_types()
         leave_type_mapping = {lt.code: lt.id for lt in leave_types}
         
-        # Get existing leaves for duplicate checking
-        existing_leaves = get_existing_leaves_set()
+        # Track pending rows in this file for same-day conflict checks
+        pending_by_employee: dict = {}
         
         # Validate each row
         preview_rows = []
@@ -541,7 +579,9 @@ async def preview_leave_upload(
             row_data = row.to_dict()
             
             # Validate the row
-            is_valid, error_message = validate_leave_upload_row(row_data, row_number, leave_type_mapping, existing_leaves)
+            is_valid, error_message = validate_leave_upload_row(
+                row_data, row_number, leave_type_mapping, pending_by_employee
+            )
             
             # Prepare row data for response
             try:
@@ -551,7 +591,7 @@ async def preview_leave_upload(
                 end_date = pd.to_datetime(row_data.get('end_date')).date() if pd.notna(row_data.get('end_date')) else None
                 days = float(row_data.get('days', 0)) if pd.notna(row_data.get('days')) else 0
                 status = str(row_data.get('status', 'Active')).strip()
-            except:
+            except Exception:
                 # If we can't parse the data, use defaults
                 employee_id = str(row_data.get('employee_id', ''))
                 leave_type_id = str(row_data.get('leave_type_id', ''))
@@ -576,12 +616,17 @@ async def preview_leave_upload(
             
             if is_valid:
                 valid_count += 1
-                # Add to existing_leaves to check for duplicates within the file
                 if start_date and end_date:
-                    existing_leaves.add((employee_id, start_date, end_date))
+                    pending_by_employee.setdefault(employee_id, []).append(
+                        (start_date, end_date, days)
+                    )
             else:
                 invalid_count += 1
-                if error_message and "Duplicate" in error_message:
+                if error_message and (
+                    "already has leave" in error_message
+                    or "half-day" in error_message
+                    or "Duplicate" in error_message
+                ):
                     duplicate_count += 1
         
         return LeaveUploadPreviewResponse(
@@ -627,8 +672,8 @@ async def upload_leaves(
         leave_types = repo_list_leave_types()
         leave_type_mapping = {lt.code: lt.id for lt in leave_types}
         
-        # Get existing leaves for duplicate checking
-        existing_leaves = get_existing_leaves_set()
+        # Track pending rows in this file for same-day conflict checks
+        pending_by_employee: dict = {}
         
         # Process each row
         success_count = 0
@@ -641,7 +686,9 @@ async def upload_leaves(
             row_data = row.to_dict()
             
             # Validate the row
-            is_valid, error_message = validate_leave_upload_row(row_data, row_number, leave_type_mapping, existing_leaves)
+            is_valid, error_message = validate_leave_upload_row(
+                row_data, row_number, leave_type_mapping, pending_by_employee
+            )
             
             if not is_valid:
                 error_count += 1
@@ -675,8 +722,9 @@ async def upload_leaves(
                 )
                 
                 success_count += 1
-                # Add to existing_leaves to prevent duplicates within the same file
-                existing_leaves.add((employee_id, start_date, end_date))
+                pending_by_employee.setdefault(employee_id, []).append(
+                    (start_date, end_date, days)
+                )
                 
             except Exception as e:
                 error_count += 1

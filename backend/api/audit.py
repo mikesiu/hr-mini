@@ -4,6 +4,7 @@ from api.dependencies import get_current_user, require_permission
 
 router = APIRouter()
 
+@router.get("")
 @router.get("/")
 async def list_audit_logs(
     entity_type: Optional[str] = Query(None, description="Filter by entity type"),

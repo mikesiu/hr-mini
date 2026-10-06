@@ -50,6 +50,7 @@ class CopyHolidaysResponse(BaseModel):
     total_source: int
     message: str
 
+@router.get("", response_model=List[HolidayResponse])
 @router.get("/", response_model=List[HolidayResponse])
 async def list_holidays(
     company_id: str = Query(..., description="Company ID"),
@@ -94,6 +95,7 @@ async def get_holiday(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching holiday: {str(e)}")
 
+@router.post("", response_model=HolidayResponse)
 @router.post("/", response_model=HolidayResponse)
 async def create_holiday(
     holiday_data: HolidayCreate,

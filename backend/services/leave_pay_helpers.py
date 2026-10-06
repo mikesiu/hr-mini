@@ -75,9 +75,11 @@ def leave_days_overlapping(
 
 
 def format_leave_dates(leaves: List) -> str:
-    """Format leave date ranges for report display."""
+    """Format leave date ranges for report display (full leave start–end as recorded)."""
     parts = []
     for leave in leaves:
+        if not leave.start_date or not leave.end_date:
+            continue
         if leave.start_date == leave.end_date:
             parts.append(leave.start_date.isoformat())
         else:

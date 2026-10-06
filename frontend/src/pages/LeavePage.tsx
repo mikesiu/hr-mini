@@ -318,7 +318,13 @@ const LeavePage: React.FC = () => {
     try {
       setPayrollLoading(true);
       const res = await leavePayrollAPI.commitPayrollImport(selectedCompanyId, payrollFile);
-      setSuccess(`Imported ${res.data.data?.imported || 0} payroll detail rows`);
+      const imported = res.data.data?.imported || 0;
+      const skipped = res.data.data?.skipped || 0;
+      setSuccess(
+        skipped > 0
+          ? `Imported ${imported} matched payroll row(s); skipped ${skipped} unmatched/ambiguous. Re-upload after fixing names.`
+          : `Imported ${imported} payroll detail rows`
+      );
       setPayrollImportOpen(false);
       setPayrollFile(null);
       setPayrollPreview(null);
@@ -1011,22 +1017,14 @@ const LeavePage: React.FC = () => {
 
   const downloadTemplate = async () => {
     try {
+      const { downloadBlobFile } = await import('../utils/downloadFile');
       const response = await apiClient.get('/leaves/upload/template', {
         responseType: 'blob'
       });
-      
-      const blob = new Blob([response.data], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      await downloadBlobFile({
+        filename: 'leave_upload_template.xlsx',
+        data: response.data,
       });
-      
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'leave_upload_template.xlsx';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to download template');
     }
@@ -1634,7 +1632,7 @@ const LeavePage: React.FC = () => {
                                 <Chip
                                   label={leaveType.code}
                                   size="small"
-                                  color={getLeaveTypeCategory(leaveType.code) === 'vacation' ? 'primary' : 
+                                  color={getLeaveTypeCategory(leaveType.code) === 'vacation' ? 'primary' :
                                          getLeaveTypeCategory(leaveType.code) === 'sick' ? 'secondary' : 'default'}
                                 />
                               )}
@@ -2150,14 +2148,27 @@ const LeavePage: React.FC = () => {
           )}
                     {payrollPreview && (
             <Box sx={{ mt: 2 }}>
-              <Alert severity={payrollPreview.can_import ? 'success' : 'warning'} sx={{ mb: 1 }}>
+              <Alert
+                severity={
+                  payrollPreview.can_import
+                    ? payrollPreview.summary?.unmatched || payrollPreview.summary?.ambiguous
+                      ? 'warning'
+                      : 'success'
+                    : 'error'
+                }
+                sx={{ mb: 1 }}
+              >
                 {payrollPreview.report_kind === 'single_employee_multi_pay'
                   ? 'Detected: one employee, multiple pay lines. '
                   : payrollPreview.report_kind === 'all_staff_single_pay'
                     ? 'Detected: all-staff single payroll. '
                     : ''}
                 Matched {payrollPreview.summary?.matched}/{payrollPreview.summary?.total}. Unmatched:{' '}
-                {payrollPreview.summary?.unmatched}, Ambiguous: {payrollPreview.summary?.ambiguous}
+                {payrollPreview.summary?.unmatched}, Ambiguous: {payrollPreview.summary?.ambiguous}.
+                {payrollPreview.can_import &&
+                (payrollPreview.summary?.unmatched || payrollPreview.summary?.ambiguous)
+                  ? ' Import will save matched rows only (overwrites existing); fix unmatched names and re-upload later.'
+                  : ''}
               </Alert>
               <TableContainer component={Paper} sx={{ maxHeight: 280 }}>
                 <Table size="small" stickyHeader>

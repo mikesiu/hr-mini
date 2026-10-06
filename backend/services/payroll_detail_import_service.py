@@ -274,7 +274,8 @@ def preview_payroll_import(file_bytes: bytes, company_id: str) -> Dict[str, Any]
             "unmatched": unmatched,
             "ambiguous": ambiguous,
         },
-        "can_import": unmatched == 0 and ambiguous == 0 and len(preview_rows) > 0,
+        # Import matched rows even when some names are unresolved; upsert overwrites existing.
+        "can_import": matched > 0,
     }
 
 
@@ -286,12 +287,17 @@ def commit_payroll_import(
     preview = preview_payroll_import(file_bytes, company_id)
     if not preview["can_import"]:
         raise ValueError(
-            "Cannot import: resolve unmatched/ambiguous employee names first "
-            f"(unmatched={preview['summary']['unmatched']}, ambiguous={preview['summary']['ambiguous']})"
+            "Cannot import: no matched employee rows "
+            f"(matched=0, unmatched={preview['summary']['unmatched']}, "
+            f"ambiguous={preview['summary']['ambiguous']})"
         )
 
     imported = 0
+    skipped = 0
     for r in preview["rows"]:
+        if r.get("match_status") != "matched" or not r.get("employee_id"):
+            skipped += 1
+            continue
         upsert_payroll_period(
             company_id=company_id,
             employee_id=r["employee_id"],
@@ -307,4 +313,8 @@ def commit_payroll_import(
         )
         imported += 1
 
-    return {"imported": imported, "summary": preview["summary"]}
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "summary": preview["summary"],
+    }

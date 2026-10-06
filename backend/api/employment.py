@@ -92,6 +92,7 @@ async def get_employment_record(
         count_all_ot=employment.count_all_ot,
     )
 
+@router.post("", response_model=EmploymentResponse)
 @router.post("/", response_model=EmploymentResponse)
 async def create_employment_record(
     employment_data: EmploymentCreate,

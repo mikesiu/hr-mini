@@ -103,7 +103,7 @@ const EmploymentPage: React.FC = () => {
 
   const { hasPermission } = useAuth();
   const { selectedEmployee: globalSelectedEmployee, setSelectedEmployee: setGlobalSelectedEmployee, clearSelection } = useSelectedEmployee();
-  const { selectedCompanyId, isFilterActive, getCompanyName } = useCompanyFilter();
+  const { selectedCompanyId, isFilterActive, getCompanyName, companies } = useCompanyFilter();
   const theme = useTheme();
 
   const getInitials = (firstName: string, lastName: string) => {
@@ -254,7 +254,7 @@ const EmploymentPage: React.FC = () => {
       const selectedEmployeeId = globalSelectedEmployee?.id;
       setFormData({
         employee_id: selectedEmployeeId || '',
-        company_id: '',
+        company_id: selectedCompanyId || '',
         position: '',
         department: '',
         start_date: '',
@@ -795,13 +795,21 @@ const EmploymentPage: React.FC = () => {
               />
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Company ID"
-                value={formData.company_id}
-                onChange={(e) => setFormData({ ...formData, company_id: e.target.value })}
-                required
-              />
+              <FormControl fullWidth required>
+                <InputLabel>Company</InputLabel>
+                <Select
+                  value={formData.company_id}
+                  label="Company"
+                  onChange={(e) => setFormData({ ...formData, company_id: e.target.value })}
+                >
+                  {companies.map((company) => (
+                    <MenuItem key={company.id} value={company.id}>
+                      {company.legal_name}
+                      {company.trade_name ? ` (${company.trade_name})` : ''}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Grid>
             <Grid item xs={12} sm={6}>
               <TextField

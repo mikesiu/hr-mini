@@ -95,6 +95,126 @@ def search_employees(q: str = ""):
         return session.execute(stmt).scalars().all()
 
 
+def list_employees_for_period(
+    company_id: str,
+    period_start: date,
+    period_end: date,
+    q: str = "",
+):
+    """
+    List employees employed at company_id during [period_start, period_end],
+    filtered by hire_date and termination last_working_date.
+    """
+    from sqlalchemy import or_, and_, exists, not_
+
+    with SessionLocal() as session:
+        # Employment overlaps the pay period at this company
+        employment_overlap = exists(
+            select(1).where(
+                and_(
+                    Employment.employee_id == Employee.id,
+                    Employment.company_id == company_id,
+                    Employment.start_date <= period_end,
+                    or_(
+                        Employment.end_date.is_(None),
+                        Employment.end_date >= period_start,
+                    ),
+                )
+            )
+        )
+
+        # Not terminated before the period starts
+        terminated_before_period = exists(
+            select(1).where(
+                and_(
+                    Termination.employee_id == Employee.id,
+                    Termination.last_working_date < period_start,
+                )
+            )
+        )
+
+        stmt = (
+            select(Employee)
+            .where(employment_overlap)
+            .where(or_(Employee.hire_date.is_(None), Employee.hire_date <= period_end))
+            .where(not_(terminated_before_period))
+        )
+
+        if q:
+            like = f"%{q}%"
+            stmt = stmt.where(
+                (Employee.first_name.ilike(like))
+                | (Employee.last_name.ilike(like))
+                | (Employee.id.ilike(like))
+            )
+
+        stmt = stmt.order_by(Employee.last_name, Employee.first_name)
+        return session.execute(stmt).scalars().all()
+
+
+def list_employee_ids_for_period(
+    company_id: str,
+    period_start: date,
+    period_end: date,
+) -> set[str]:
+    """Employee IDs active at company during the period (hire / termination aware)."""
+    return {emp.id for emp in list_employees_for_period(company_id, period_start, period_end)}
+
+
+def filter_employee_ids_active_in_period(
+    employee_ids: set[str] | list[str],
+    period_start: date,
+    period_end: date,
+) -> set[str]:
+    """
+    Keep employees who were not hired after the period and not terminated before it.
+    Does not require company employment (use list_employee_ids_for_period when company is known).
+    """
+    ids = {eid for eid in employee_ids if eid}
+    if not ids:
+        return set()
+
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(Employee.id, Employee.hire_date, Termination.last_working_date)
+            .select_from(Employee)
+            .outerjoin(Termination, Termination.employee_id == Employee.id)
+            .where(Employee.id.in_(list(ids)))
+        ).all()
+
+        active: set[str] = set()
+        for emp_id, hire_date, last_working_date in rows:
+            if hire_date is not None and hire_date > period_end:
+                continue
+            if last_working_date is not None and last_working_date < period_start:
+                continue
+            active.add(emp_id)
+        return active
+
+
+def get_employee_active_bounds_map(
+    employee_ids: set[str] | list[str],
+) -> dict[str, tuple[Optional[date], Optional[date]]]:
+    """
+    Map employee_id -> (active_from, active_to) using hire_date and termination
+    last_working_date. active_to is None when still employed.
+    """
+    ids = {eid for eid in employee_ids if eid}
+    if not ids:
+        return {}
+
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(Employee.id, Employee.hire_date, Termination.last_working_date)
+            .select_from(Employee)
+            .outerjoin(Termination, Termination.employee_id == Employee.id)
+            .where(Employee.id.in_(list(ids)))
+        ).all()
+        return {
+            emp_id: (hire_date, last_working_date)
+            for emp_id, hire_date, last_working_date in rows
+        }
+
 def employee_exists(emp_id: str) -> bool:
     with SessionLocal() as session:
         stmt = select(func.count()).select_from(Employee).where(Employee.id == emp_id)

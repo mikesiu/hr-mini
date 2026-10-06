@@ -205,6 +205,31 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
+function getAttendanceReportPeriodLabel(
+  startDate: string,
+  endDate: string,
+  payPeriod?: PayPeriod | null
+): string {
+  if (payPeriod) {
+    return `Period ${payPeriod.period_number} (${payPeriod.start_date} to ${payPeriod.end_date})`;
+  }
+  return `${startDate} to ${endDate}`;
+}
+
+function getAttendanceReportHeadcount(
+  report: AttendanceReport | null,
+  detailedReport: AttendanceDetailedReport | null,
+  view: 'summary' | 'detailed'
+): number {
+  if (view === 'summary' && report) {
+    return report.summary.length;
+  }
+  if (view === 'detailed' && detailedReport) {
+    return new Set(detailedReport.details.map((d) => d.employee_id)).size;
+  }
+  return 0;
+}
+
 const ATTENDANCE_PRINT_STYLES = `
   body { font-family: Arial, sans-serif; margin: 20px; }
   .report-header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
@@ -260,7 +285,8 @@ function generateDetailedPrintTable(rowsWithSubtotals: DetailedRowWithSubtotal[]
     if (item.type === 'detail') {
       const row = item.row;
       const leaveStat = [row.leave_type, row.stat_holiday_name].filter(Boolean).join(' / ') || '-';
-      const rowClass = row.day_type === 'Weekend' ? 'weekend-row' : '';
+      const isWeekendDay = row.day_type === 'Saturday' || row.day_type === 'Sunday';
+      const rowClass = isWeekendDay ? 'weekend-row' : '';
       return `
         <tr class="${rowClass}">
           <td>${escapeHtml(row.employee_name)}</td>
@@ -280,7 +306,7 @@ function generateDetailedPrintTable(rowsWithSubtotals: DetailedRowWithSubtotal[]
     const subtotal = item.subtotal;
     return `
       <tr class="subtotal-row">
-        <td colspan="6" style="text-align: right;">Subtotal for ${escapeHtml(subtotal.employee_name)}:</td>
+        <td colspan="6" style="text-align: right;">Subtotal for ${escapeHtml(subtotal.employee_name)} (${escapeHtml(subtotal.employee_id)}):</td>
         <td>${subtotal.regular_hours.toFixed(2)}</td>
         <td>${subtotal.ot_hours.toFixed(2)}</td>
         <td>${subtotal.weekend_ot_hours.toFixed(2)}</td>
@@ -298,7 +324,7 @@ function generateDetailedPrintTable(rowsWithSubtotals: DetailedRowWithSubtotal[]
           <th>Leave/Stat Holiday</th>
           <th>Start Time</th>
           <th>End Time</th>
-          <th>Weekday/Weekend</th>
+          <th>Day</th>
           <th>Reg Hours</th>
           <th>OT Hours</th>
           <th>Weekend OT</th>
@@ -406,9 +432,25 @@ const AttendancePage: React.FC = () => {
     }
 
     try {
-      const response = await employeeAPI.list({ company_id: selectedCompanyId });
+      const params: {
+        company_id: string;
+        pay_period_start?: string;
+        pay_period_end?: string;
+      } = { company_id: selectedCompanyId };
+
+      if (selectedPayPeriod) {
+        params.pay_period_start = selectedPayPeriod.start_date;
+        params.pay_period_end = selectedPayPeriod.end_date;
+      }
+
+      const response = await employeeAPI.list(params);
       if (response.data && response.data.success) {
-        setEmployees(response.data.data || []);
+        const list = response.data.data || [];
+        setEmployees(list);
+        // Clear selection if the selected employee is no longer in the filtered list
+        setSelectedEmployeeId((prev) =>
+          prev && !list.some((emp: Employee) => emp.id === prev) ? '' : prev
+        );
       } else {
         setEmployees([]);
       }
@@ -416,7 +458,7 @@ const AttendancePage: React.FC = () => {
       console.error('Error fetching employees:', err);
       setEmployees([]);
     }
-  }, [selectedCompanyId]);
+  }, [selectedCompanyId, selectedPayPeriod]);
 
   const loadAttendance = React.useCallback(async () => {
     try {
@@ -545,7 +587,7 @@ const AttendancePage: React.FC = () => {
     }
   }, [selectedCompanyId, selectedYear, fetchPayPeriods]);
 
-  // Fetch employees when company changes
+  // Fetch employees when company or pay period changes
   useEffect(() => {
     if (selectedCompanyId) {
       fetchEmployees();
@@ -661,11 +703,10 @@ const AttendancePage: React.FC = () => {
     }
   };
 
-  const handleExportReport = async (format: 'excel' | 'csv') => {
-    // Use pay period dates if selected, otherwise use manual date range
+  const handleExportReport = async (_format: 'excel' | 'csv' = 'excel') => {
     let startDate = reportFilters.start_date;
     let endDate = reportFilters.end_date;
-    
+
     if (reportPayPeriod) {
       startDate = reportPayPeriod.start_date;
       endDate = reportPayPeriod.end_date;
@@ -675,25 +716,202 @@ const AttendancePage: React.FC = () => {
       setSnackbar({ open: true, message: 'Please select a date range or pay period', severity: 'error' });
       return;
     }
+
+    if (!report && !detailedReport) {
+      setSnackbar({ open: true, message: 'Please generate a report first', severity: 'error' });
+      return;
+    }
+
+    const filename = `attendance_report_${startDate}_${endDate}.xlsx`;
+
     try {
-      const response = await attendanceAPI.exportReport({
-        company_id: selectedCompanyId || undefined,
-        start_date: startDate,
-        end_date: endDate,
-        format,
+      setLoading(true);
+      const { downloadGeneratedExcel } = await import('../utils/downloadFile');
+
+      const result = await downloadGeneratedExcel({
+        filename,
+        build: async () => {
+          const ExcelJS = await import('exceljs');
+          const workbook = new ExcelJS.Workbook();
+          const worksheet = workbook.addWorksheet(
+            reportView === 'detailed' ? 'Detailed Report' : 'Summary Report'
+          );
+
+          let currentRow = 1;
+          const headerFill = {
+            type: 'pattern' as const,
+            pattern: 'solid' as const,
+            fgColor: { argb: 'FFE0E0E0' },
+          };
+
+          const periodLabel = getAttendanceReportPeriodLabel(startDate, endDate, reportPayPeriod);
+          const headcount = getAttendanceReportHeadcount(report, detailedReport, reportView);
+          worksheet.getCell(currentRow, 1).value = `Time Attendance - ${periodLabel}`;
+          worksheet.getCell(currentRow, 1).font = { bold: true, size: 14 };
+          currentRow++;
+          worksheet.getCell(currentRow, 1).value = `Total number of headcount: ${headcount}`;
+          worksheet.getCell(currentRow, 1).font = { bold: true };
+          currentRow += 2;
+
+          if (reportView === 'detailed' && detailedReport) {
+            const headers = [
+              'Employee', 'Date', 'Leave/Stat Holiday', 'Start Time', 'End Time',
+              'Day', 'Reg Hours', 'OT Hours', 'Weekend OT', 'Stat Holiday',
+            ];
+            const detailColCount = headers.length;
+            const subtotalFill = {
+              type: 'pattern' as const,
+              pattern: 'solid' as const,
+              fgColor: { argb: 'FFC6EFCE' }, // light green
+            };
+            const weekendFill = {
+              type: 'pattern' as const,
+              pattern: 'solid' as const,
+              fgColor: { argb: 'FFF2F2F2' }, // very light grey
+            };
+            const statHolidayFill = {
+              type: 'pattern' as const,
+              pattern: 'solid' as const,
+              fgColor: { argb: 'FFDDEBF7' }, // light blue
+            };
+
+            headers.forEach((header, index) => {
+              const cell = worksheet.getCell(currentRow, index + 1);
+              cell.value = header;
+              cell.font = { bold: true };
+              cell.fill = headerFill;
+            });
+            currentRow++;
+
+            const rowsWithSubtotals = buildDetailedRowsWithSubtotals(
+              detailedReport.details,
+              reportPeriodOverrides
+            );
+
+            rowsWithSubtotals.forEach((item) => {
+              if (item.type === 'detail') {
+                const row = item.row;
+                const leaveStat = [row.leave_type, row.stat_holiday_name].filter(Boolean).join(' / ') || '-';
+                const values = [
+                  row.employee_name,
+                  row.date,
+                  leaveStat,
+                  row.check_in || '-',
+                  row.check_out || '-',
+                  row.day_type,
+                  Number(row.regular_hours.toFixed(2)),
+                  Number(row.ot_hours.toFixed(2)),
+                  Number(row.weekend_ot_hours.toFixed(2)),
+                  Number((row.stat_holiday_hours || 0).toFixed(2)),
+                ];
+                const isWeekend = row.day_type === 'Saturday' || row.day_type === 'Sunday';
+                const isStatHoliday = Boolean(row.stat_holiday_name);
+                const rowFill = isStatHoliday
+                  ? statHolidayFill
+                  : isWeekend
+                    ? weekendFill
+                    : null;
+
+                values.forEach((cellValue, index) => {
+                  const cell = worksheet.getCell(currentRow, index + 1);
+                  cell.value = cellValue;
+                  if (rowFill) {
+                    cell.fill = rowFill;
+                  }
+                });
+                currentRow++;
+              } else {
+                const subtotal = item.subtotal;
+                // Do not write empty strings into B–F — that blocks label overflow in Excel.
+                // Merge Employee→Day so the full subtotal label is visible.
+                worksheet.mergeCells(currentRow, 1, currentRow, 6);
+                const labelCell = worksheet.getCell(currentRow, 1);
+                labelCell.value = `Subtotal for ${subtotal.employee_name} (${subtotal.employee_id})`;
+                labelCell.alignment = { vertical: 'middle' };
+
+                const hourValues: Array<[number, number]> = [
+                  [7, Number(subtotal.regular_hours.toFixed(2))],
+                  [8, Number(subtotal.ot_hours.toFixed(2))],
+                  [9, Number(subtotal.weekend_ot_hours.toFixed(2))],
+                  [10, Number((subtotal.stat_holiday_hours || 0).toFixed(2))],
+                ];
+                hourValues.forEach(([col, value]) => {
+                  worksheet.getCell(currentRow, col).value = value;
+                });
+
+                for (let col = 1; col <= detailColCount; col++) {
+                  const cell = worksheet.getCell(currentRow, col);
+                  cell.fill = subtotalFill;
+                  cell.font = { bold: true };
+                }
+                currentRow++;
+              }
+            });
+          } else if (report) {
+            worksheet.getCell(currentRow, 1).value = 'Total Regular Hours';
+            worksheet.getCell(currentRow, 2).value = Number(report.total_regular_hours.toFixed(2));
+            currentRow++;
+            worksheet.getCell(currentRow, 1).value = 'Total OT Hours';
+            worksheet.getCell(currentRow, 2).value = Number(report.total_ot_hours.toFixed(2));
+            currentRow++;
+            worksheet.getCell(currentRow, 1).value = 'Total Weekend OT';
+            worksheet.getCell(currentRow, 2).value = Number(report.total_weekend_ot_hours.toFixed(2));
+            currentRow++;
+            worksheet.getCell(currentRow, 1).value = 'Total Stat Holiday Hours';
+            worksheet.getCell(currentRow, 2).value = Number(report.total_stat_holiday_hours.toFixed(2));
+            currentRow += 2;
+
+            const headers = ['Employee', 'Regular Hours', 'OT Hours', 'Weekend OT', 'Stat Holiday', 'Days'];
+            headers.forEach((header, index) => {
+              const cell = worksheet.getCell(currentRow, index + 1);
+              cell.value = header;
+              cell.font = { bold: true };
+              cell.fill = headerFill;
+            });
+            currentRow++;
+
+            report.summary.forEach((item) => {
+              const values = [
+                item.employee_name,
+                Number(item.total_regular_hours.toFixed(2)),
+                Number(item.total_ot_hours.toFixed(2)),
+                Number(item.total_weekend_ot_hours.toFixed(2)),
+                Number(item.total_stat_holiday_hours.toFixed(2)),
+                item.total_days,
+              ];
+              values.forEach((cellValue, index) => {
+                worksheet.getCell(currentRow, index + 1).value = cellValue;
+              });
+              currentRow++;
+            });
+          }
+
+          worksheet.columns.forEach((column) => {
+            column.width = 15;
+          });
+
+          return workbook.xlsx.writeBuffer();
+        },
       });
-      const blob = new Blob([response.data]);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `attendance_report_${startDate}_${endDate}.${format === 'excel' ? 'xlsx' : 'csv'}`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      setSnackbar({ open: true, message: 'Report exported successfully', severity: 'success' });
+
+      if (result === 'cancelled') {
+        return;
+      }
+
+      setSnackbar({
+        open: true,
+        message: result === 'saved' ? `Saved ${filename}` : `Report exported`,
+        severity: 'success',
+      });
     } catch (error: any) {
-      setSnackbar({ open: true, message: `Error exporting report: ${error.response?.data?.detail || error.message}`, severity: 'error' });
+      console.error('Error exporting attendance report:', error);
+      setSnackbar({
+        open: true,
+        message: `Error exporting report: ${error?.message || 'Unknown error'}`,
+        severity: 'error',
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -728,6 +946,8 @@ const AttendancePage: React.FC = () => {
     const payPeriodLabel = reportPayPeriod
       ? `Period ${reportPayPeriod.period_number} (${reportPayPeriod.start_date} to ${reportPayPeriod.end_date})`
       : null;
+    const periodLabel = getAttendanceReportPeriodLabel(startDate, endDate, reportPayPeriod);
+    const headcount = getAttendanceReportHeadcount(report, detailedReport, reportView);
     const viewLabel = reportView === 'detailed' ? 'Detailed' : 'Summary';
     const tableHtml = reportView === 'detailed' && detailedReport
       ? generateDetailedPrintTable(
@@ -747,13 +967,13 @@ const AttendancePage: React.FC = () => {
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Attendance Report - ${viewLabel}</title>
+        <title>Time Attendance - ${escapeHtml(periodLabel)}</title>
         <style>${ATTENDANCE_PRINT_STYLES}</style>
       </head>
       <body>
         <div class="report-header">
-          <div class="report-title">Attendance Report — ${viewLabel}</div>
-          <div class="report-subtitle">Generated on ${new Date().toLocaleDateString()}</div>
+          <div class="report-title">Time Attendance - ${escapeHtml(periodLabel)}</div>
+          <div class="report-subtitle">Total number of headcount: ${headcount} &nbsp;|&nbsp; ${viewLabel} &nbsp;|&nbsp; Generated on ${new Date().toLocaleDateString()}</div>
         </div>
         <div class="report-meta">
           <div><strong>Company:</strong> ${escapeHtml(companyName)}</div>
@@ -2119,9 +2339,18 @@ const AttendancePage: React.FC = () => {
 
             {report && reportView === 'summary' && (
               <Box>
-                <Typography variant="h6" gutterBottom>
-                  Summary
-                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 2, mb: 1 }}>
+                  <Typography variant="h6">
+                    Time Attendance - {getAttendanceReportPeriodLabel(
+                      reportPayPeriod?.start_date || reportFilters.start_date,
+                      reportPayPeriod?.end_date || reportFilters.end_date,
+                      reportPayPeriod
+                    )}
+                  </Typography>
+                  <Typography variant="subtitle1">
+                    Total number of headcount: {getAttendanceReportHeadcount(report, null, 'summary')}
+                  </Typography>
+                </Box>
                 <Typography>
                   Total Regular Hours: {report.total_regular_hours.toFixed(2)}
                 </Typography>
@@ -2172,9 +2401,18 @@ const AttendancePage: React.FC = () => {
 
               return (
                 <Box>
-                  <Typography variant="h6" gutterBottom>
-                    Detailed Report (Grouped by Staff)
-                  </Typography>
+                  <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 2, mb: 1 }}>
+                    <Typography variant="h6">
+                      Time Attendance - {getAttendanceReportPeriodLabel(
+                        reportPayPeriod?.start_date || reportFilters.start_date,
+                        reportPayPeriod?.end_date || reportFilters.end_date,
+                        reportPayPeriod
+                      )}
+                    </Typography>
+                    <Typography variant="subtitle1">
+                      Total number of headcount: {getAttendanceReportHeadcount(null, detailedReport, 'detailed')}
+                    </Typography>
+                  </Box>
                   <TableContainer sx={{ mt: 2 }}>
                     <Table>
                       <TableHead>
@@ -2184,7 +2422,7 @@ const AttendancePage: React.FC = () => {
                           <TableCell>Leave/Stat Holiday</TableCell>
                           <TableCell>Start Time</TableCell>
                           <TableCell>End Time</TableCell>
-                          <TableCell>Weekday/Weekend</TableCell>
+                          <TableCell>Day</TableCell>
                           <TableCell>Reg Hours</TableCell>
                           <TableCell>OT Hours</TableCell>
                           <TableCell>Weekend OT</TableCell>
@@ -2199,7 +2437,9 @@ const AttendancePage: React.FC = () => {
                               <TableRow 
                                 key={`${row.employee_id}-${row.date}-${index}`}
                                 sx={{
-                                  backgroundColor: row.day_type === 'Weekend' ? 'rgba(0, 0, 0, 0.12)' : 'transparent',
+                                  backgroundColor: (row.day_type === 'Saturday' || row.day_type === 'Sunday')
+                                    ? 'rgba(0, 0, 0, 0.12)'
+                                    : 'transparent',
                                 }}
                               >
                                 <TableCell>{row.employee_name}</TableCell>
@@ -2231,7 +2471,7 @@ const AttendancePage: React.FC = () => {
                             return (
                               <TableRow key={`subtotal-${subtotal.employee_id}-${index}`} sx={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}>
                                 <TableCell colSpan={6} sx={{ fontWeight: 'bold', textAlign: 'right' }}>
-                                  Subtotal for {subtotal.employee_name}:
+                                  Subtotal for {subtotal.employee_name} ({subtotal.employee_id}):
                                 </TableCell>
                                 <TableCell sx={{ fontWeight: 'bold' }}>{subtotal.regular_hours.toFixed(2)}</TableCell>
                                 <TableCell sx={{ fontWeight: 'bold' }}>{subtotal.ot_hours.toFixed(2)}</TableCell>

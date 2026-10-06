@@ -242,8 +242,19 @@ def get_company_by_id(company_id: str) -> Optional[Company]:
         return session.get(Company, company_id)
 
 
-def end_current_employment(employee_id: str, end_date: date, *, performed_by: str | None = None) -> bool:
-    with SessionLocal() as session:
+def end_current_employment(
+    employee_id: str,
+    end_date: date,
+    *,
+    performed_by: str | None = None,
+    session=None,
+) -> bool:
+    """End the open employment record for an employee as of end_date."""
+    owns_session = session is None
+    if owns_session:
+        session = SessionLocal()
+
+    try:
         employment = session.execute(
             select(Employment)
             .where(Employment.employee_id == employee_id)
@@ -256,8 +267,11 @@ def end_current_employment(employee_id: str, end_date: date, *, performed_by: st
 
         before = model_to_dict(employment)
         employment.end_date = end_date
-        session.commit()
-        session.refresh(employment)
+        if owns_session:
+            session.commit()
+            session.refresh(employment)
+        else:
+            session.flush()
 
         log_action(
             entity="employment",
@@ -268,3 +282,10 @@ def end_current_employment(employee_id: str, end_date: date, *, performed_by: st
             after=model_to_dict(employment),
         )
         return True
+    except Exception:
+        if owns_session:
+            session.rollback()
+        raise
+    finally:
+        if owns_session:
+            session.close()

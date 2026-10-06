@@ -17,7 +17,8 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 sys.path.append(str(Path(__file__).parent.parent))
 from repos.employee_repo import (
     search_employees, create_employee, get_employee, 
-    update_employee, delete_employee, employee_exists
+    update_employee, delete_employee, employee_exists,
+    list_employees_for_period,
 )
 from repos.employment_repo import get_current_employment, create_employment
 from repos.company_repo import get_company_by_id
@@ -69,36 +70,57 @@ def _employee_to_response(emp, company_id=None, company_short_form=None) -> Empl
 async def list_employees(
     q: Optional[str] = Query(None, description="Search term for employee name or ID"),
     company_id: Optional[str] = Query(None, description="Filter by company ID"),
+    pay_period_start: Optional[date] = Query(None, description="Pay period start (YYYY-MM-DD)"),
+    pay_period_end: Optional[date] = Query(None, description="Pay period end (YYYY-MM-DD)"),
     current_user: dict = Depends(require_permission("employee:view"))
 ):
-    """Get list of employees with optional search and company filtering"""
-    employees = search_employees(q or "")
+    """Get list of employees with optional search, company, and pay-period filtering.
     
-    # Filter by company if specified
-    if company_id:
-        filtered_employees = []
-        for emp in employees:
-            current_employment = get_current_employment(emp.id)
-            if current_employment and current_employment.company_id == company_id:
-                filtered_employees.append(emp)
-        employees = filtered_employees
+    When pay_period_start and pay_period_end are provided with company_id, returns
+    employees employed at that company during the period, filtered by hire_date and
+    termination last_working_date.
+    """
+    if pay_period_start and pay_period_end and company_id:
+        if pay_period_start > pay_period_end:
+            raise HTTPException(status_code=400, detail="pay_period_start must be on or before pay_period_end")
+        employees = list_employees_for_period(
+            company_id=company_id,
+            period_start=pay_period_start,
+            period_end=pay_period_end,
+            q=q or "",
+        )
+    else:
+        employees = search_employees(q or "")
+        
+        # Filter by company if specified (as of today)
+        if company_id:
+            filtered_employees = []
+            for emp in employees:
+                current_employment = get_current_employment(emp.id)
+                if current_employment and current_employment.company_id == company_id:
+                    filtered_employees.append(emp)
+            employees = filtered_employees
     
     # Convert SQLAlchemy models to Pydantic models
     employee_list = []
     for emp in employees:
-        # Get current employment information
-        current_employment = get_current_employment(emp.id)
-        company_id = None
+        # For period-scoped lists, prefer employment overlapping the period; else today
+        if pay_period_start and pay_period_end and company_id:
+            current_employment = get_current_employment(emp.id, as_of_date=pay_period_end)
+            if not current_employment or current_employment.company_id != company_id:
+                current_employment = get_current_employment(emp.id, as_of_date=pay_period_start)
+        else:
+            current_employment = get_current_employment(emp.id)
+        emp_company_id = None
         company_short_form = None
         
         if current_employment:
-            company_id = current_employment.company_id
-            # Get company short form (company ID)
+            emp_company_id = current_employment.company_id
             company = get_company_by_id(current_employment.company_id)
             if company:
                 company_short_form = company.id
         
-        employee_list.append(_employee_to_response(emp, company_id, company_short_form))
+        employee_list.append(_employee_to_response(emp, emp_company_id, company_short_form))
     
     return {"success": True, "data": employee_list}
 
@@ -126,6 +148,7 @@ async def get_employee_by_id(
     
     return _employee_to_response(employee, company_id, company_short_form)
 
+@router.post("", response_model=EmployeeResponse)
 @router.post("/", response_model=EmployeeResponse)
 async def create_new_employee(
     employee_data: EmployeeCreate,

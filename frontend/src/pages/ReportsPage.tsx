@@ -20,6 +20,7 @@ import {
   ReportFilters as FilterValues,
 } from '../types/reports';
 import { FILTER_CONFIGS } from '../utils/filterValidation';
+import { downloadVacationLedgerPdfsByEmployee } from '../utils/vacationLedgerPdf';
 // Dynamic import for ExcelJS
 
 // Helper function to format dates correctly without timezone issues
@@ -282,6 +283,60 @@ export default function ReportsPage() {
     }
   };
 
+  const handlePrintIndividualVacationLedger = async () => {
+    if (selectedReportType !== 'vacation_pay_ledger' || !Array.isArray(reportData) || reportData.length === 0) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError(null);
+
+      const byEmployee = new Map<
+        string,
+        { employee_id: string; employee_name: string; rows: any[] }
+      >();
+      for (const row of reportData as any[]) {
+        const key = String(row.employee_id || row.employee_name || '');
+        if (!byEmployee.has(key)) {
+          byEmployee.set(key, {
+            employee_id: row.employee_id || '',
+            employee_name: row.employee_name || 'N/A',
+            rows: [],
+          });
+        }
+        byEmployee.get(key)!.rows.push(row);
+      }
+
+      const companyId = filters.company_id || reportSummary?.filters_applied?.company_id;
+      const company = companies.find((c) => c.id === companyId);
+      const companyLabel = company
+        ? `${company.legal_name}${company.trade_name ? ` (${company.trade_name})` : ''}`
+        : companyId || '';
+      const year =
+        (reportSummary?.filters_applied as any)?.year ||
+        (filters.start_date ? String(filters.start_date).slice(0, 4) : '');
+      const generated = new Date(reportSummary?.generated_at || Date.now()).toLocaleDateString();
+
+      const result = await downloadVacationLedgerPdfsByEmployee(
+        Array.from(byEmployee.values()),
+        { companyLabel, year, generated }
+      );
+
+      if (result.cancelled) {
+        return;
+      }
+      if (result.fileCount === 0) {
+        setError('No employee rows to export');
+      }
+    } catch (err: any) {
+      console.error('Error downloading vacation ledger PDFs:', err);
+      setError(err?.message || 'Failed to download employee PDFs');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const generateGroupedPrintTable = () => {
     if (reportData.length === 0) return '<p>No data available</p>';
     
@@ -301,7 +356,7 @@ export default function ReportsPage() {
         case 'leave_taken':
           return ['Employee', 'Leave Type', 'Start Date', 'End Date', 'Days', 'Status', 'Reason'];
         case 'vacation_pay_ledger':
-          return ['Employee', 'Gross', 'Benefits', 'Vac Paid', 'Vac %', 'Vac Earned', 'Vac Taken', 'Vac Balance', 'Sick Pay', 'Sick Bal', 'Sick Taken'];
+          return ['Employee', 'Gross', 'Benefits', 'Vac Paid', 'Vac %', 'Vac Earned', 'Vac Balance $', 'Vac Taken', 'Vac Bal Days', 'Sick Taken', 'Sick Bal'];
         case 'expense_reimbursement':
           return ['Employee', 'Claim ID', 'Paid Date', 'Expense Type', 'Receipts Amount', 'Claims Amount', 'Notes', 'Document'];
         case 'employee_basic_profile':
@@ -679,11 +734,13 @@ export default function ReportsPage() {
               <th>Vacation Paid</th>
               <th>Vac %</th>
               <th>Vac Earned</th>
-              <th>Vac Taken</th>
               <th>Vac Balance $</th>
-              <th>Sick Pay</th>
-              <th>Sick Bal</th>
+              <th>Vac Taken</th>
+              <th>Vac Dates</th>
+              <th>Vac Balance Days</th>
               <th>Sick Taken</th>
+              <th>Sick Dates</th>
+              <th>Sick Bal</th>
             </tr>
           </thead>
           <tbody>
@@ -700,11 +757,13 @@ export default function ReportsPage() {
               <td>${money(row.vacation_paid)}</td>
               <td>${row.vacation_percent != null ? row.vacation_percent + '%' : ''}</td>
               <td>${money(row.vacation_amount_earned)}</td>
-              <td>${row.vacation_taken_days?.toFixed?.(1) || 0} ${row.vacation_taken_dates || ''}</td>
               <td><strong>${money(row.vacation_balance)}</strong></td>
-              <td>${money(row.sick_pay)}</td>
+              <td>${row.vacation_taken_days?.toFixed?.(1) || 0}</td>
+              <td>${row.vacation_taken_dates || ''}</td>
+              <td>${row.vacation_balance_days?.toFixed?.(1) ?? 0}</td>
+              <td>${row.sick_leave_taken_days?.toFixed?.(1) || 0}</td>
+              <td>${row.sick_leave_taken_dates || ''}</td>
               <td>${row.sick_leave_balance?.toFixed?.(1) || 0}</td>
-              <td>${row.sick_leave_taken_days?.toFixed?.(1) || 0} ${row.sick_leave_taken_dates || ''}</td>
             </tr>
           `;
         });
@@ -811,60 +870,40 @@ export default function ReportsPage() {
     if (!selectedReportType) return;
 
     try {
-      // Dynamic import for ExcelJS
-      const ExcelJS = await import('exceljs');
-      
-      // Create workbook and worksheet
-      const workbook = new ExcelJS.Workbook();
-      const worksheet = workbook.addWorksheet('Report Data');
-      
-      // Check if data is grouped
-      const isGrouped = reportSummary?.group_by_applied && reportSummary.group_by_applied.length > 0;
-      
-      let currentRow = 1;
-      
-      if (isGrouped) {
-        // Handle grouped data
-        reportData.forEach((group: any) => {
-          // Add group header
-          worksheet.getCell(`A${currentRow}`).value = `${group.group_value} (${group.group_count} records)`;
-          worksheet.getCell(`A${currentRow}`).font = { bold: true };
-          currentRow++;
-          
-          // Add headers
-          const headers = getTableHeaders();
-          headers.forEach((header, index) => {
-            const cell = worksheet.getCell(currentRow, index + 1);
-            cell.value = header;
-            cell.font = { bold: true };
-            cell.fill = {
-              type: 'pattern',
-              pattern: 'solid',
-              fgColor: { argb: 'FFE0E0E0' }
-            };
-          });
-          currentRow++;
-          
-          // Add group records
-          if (group.records && group.records.length > 0) {
-            group.records.forEach((record: any) => {
-              const row = getTableCells(record);
-              row.forEach((cellValue, index) => {
-                worksheet.getCell(currentRow, index + 1).value = cellValue;
+      const { downloadGeneratedExcel } = await import('../utils/downloadFile');
+      const filename = `${selectedReportType}_report_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+      const result = await downloadGeneratedExcel({
+        filename,
+        build: async () => {
+          const ExcelJS = await import('exceljs');
+          const workbook = new ExcelJS.Workbook();
+          const worksheet = workbook.addWorksheet('Report Data');
+
+          const isGrouped = reportSummary?.group_by_applied && reportSummary.group_by_applied.length > 0;
+          let currentRow = 1;
+
+          if (isGrouped) {
+            reportData.forEach((group: any) => {
+              worksheet.getCell(`A${currentRow}`).value = `${group.group_value} (${group.group_count} records)`;
+              worksheet.getCell(`A${currentRow}`).font = { bold: true };
+              currentRow++;
+
+              const headers = getTableHeaders();
+              headers.forEach((header, index) => {
+                const cell = worksheet.getCell(currentRow, index + 1);
+                cell.value = header;
+                cell.font = { bold: true };
+                cell.fill = {
+                  type: 'pattern',
+                  pattern: 'solid',
+                  fgColor: { argb: 'FFE0E0E0' },
+                };
               });
               currentRow++;
-            });
-          }
-          
-          // Add subgroup data if exists
-          if (group.subgroups && group.subgroups.length > 0) {
-            group.subgroups.forEach((subgroup: any) => {
-              worksheet.getCell(`A${currentRow}`).value = `  ${subgroup.group_value} (${subgroup.group_count} records)`;
-              worksheet.getCell(`A${currentRow}`).font = { bold: true, italic: true };
-              currentRow++;
-              
-              if (subgroup.records && subgroup.records.length > 0) {
-                subgroup.records.forEach((record: any) => {
+
+              if (group.records && group.records.length > 0) {
+                group.records.forEach((record: any) => {
                   const row = getTableCells(record);
                   row.forEach((cellValue, index) => {
                     worksheet.getCell(currentRow, index + 1).value = cellValue;
@@ -872,56 +911,61 @@ export default function ReportsPage() {
                   currentRow++;
                 });
               }
+
+              if (group.subgroups && group.subgroups.length > 0) {
+                group.subgroups.forEach((subgroup: any) => {
+                  worksheet.getCell(`A${currentRow}`).value = `  ${subgroup.group_value} (${subgroup.group_count} records)`;
+                  worksheet.getCell(`A${currentRow}`).font = { bold: true, italic: true };
+                  currentRow++;
+
+                  if (subgroup.records && subgroup.records.length > 0) {
+                    subgroup.records.forEach((record: any) => {
+                      const row = getTableCells(record);
+                      row.forEach((cellValue, index) => {
+                        worksheet.getCell(currentRow, index + 1).value = cellValue;
+                      });
+                      currentRow++;
+                    });
+                  }
+                });
+              }
+
+              currentRow++;
+            });
+          } else {
+            const headers = getTableHeaders();
+            headers.forEach((header, index) => {
+              const cell = worksheet.getCell(currentRow, index + 1);
+              cell.value = header;
+              cell.font = { bold: true };
+              cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFE0E0E0' },
+              };
+            });
+            currentRow++;
+
+            reportData.forEach((record: any) => {
+              const row = getTableCells(record);
+              row.forEach((cellValue, index) => {
+                worksheet.getCell(currentRow, index + 1).value = cellValue;
+              });
+              currentRow++;
             });
           }
-          
-          currentRow++; // Empty row between groups
-        });
-      } else {
-        // Handle regular data
-        const headers = getTableHeaders();
-        headers.forEach((header, index) => {
-          const cell = worksheet.getCell(currentRow, index + 1);
-          cell.value = header;
-          cell.font = { bold: true };
-          cell.fill = {
-            type: 'pattern',
-            pattern: 'solid',
-            fgColor: { argb: 'FFE0E0E0' }
-          };
-        });
-        currentRow++;
-        
-        reportData.forEach((record: any) => {
-          const row = getTableCells(record);
-          row.forEach((cellValue, index) => {
-            worksheet.getCell(currentRow, index + 1).value = cellValue;
+
+          worksheet.columns.forEach((column) => {
+            column.width = 15;
           });
-          currentRow++;
-        });
+
+          return workbook.xlsx.writeBuffer();
+        },
+      });
+
+      if (result === 'cancelled') {
+        return;
       }
-      
-      // Auto-fit columns
-      worksheet.columns.forEach(column => {
-        column.width = 15;
-      });
-      
-      // Generate Excel file
-      const buffer = await workbook.xlsx.writeBuffer();
-      
-      // Create and download file
-      const blob = new Blob([buffer], {
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${selectedReportType}_report_${new Date().toISOString().split('T')[0]}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-      
     } catch (error) {
       console.error('Error exporting report:', error);
       setError('Failed to export report');
@@ -942,8 +986,9 @@ export default function ReportsPage() {
       case 'vacation_pay_ledger':
         return [
           'Employee', 'Payroll Date', 'Gross Pay', 'Benefits', 'Vacation Paid',
-          'Vacation %', 'Vacation Earned', 'Vacation Taken Days', 'Vacation Taken Dates',
-          'Vacation Balance $', 'Sick Pay', 'Sick Balance', 'Sick Taken Days', 'Sick Taken Dates', 'Opening $',
+          'Vacation %', 'Vacation Earned', 'Vacation Balance $', 'Vacation Taken Days',
+          'Vacation Taken Dates', 'Vacation Balance Days', 'Sick Taken Days',
+          'Sick Taken Dates', 'Sick Balance', 'Opening $',
         ];
       case 'salary_analysis':
         return ['Employee', 'Position', 'Company', 'Pay Rate', 'Pay Type', 'Effective Date', 'End Date', 'Notes'];
@@ -1010,13 +1055,13 @@ export default function ReportsPage() {
           record.vacation_paid ?? 0,
           record.vacation_percent ?? '',
           record.vacation_amount_earned ?? 0,
+          record.vacation_balance ?? 0,
           record.vacation_taken_days ?? 0,
           record.vacation_taken_dates || '',
-          record.vacation_balance ?? 0,
-          record.sick_pay ?? 0,
-          record.sick_leave_balance ?? 0,
+          record.vacation_balance_days ?? 0,
           record.sick_leave_taken_days ?? 0,
           record.sick_leave_taken_dates || '',
+          record.sick_leave_balance ?? 0,
           record.opening_balance ?? 0,
         ];
         case 'salary_analysis':
@@ -1114,6 +1159,11 @@ export default function ReportsPage() {
               summary={reportSummary}
               loading={loading}
               onPrint={handlePrint}
+              onPrintIndividual={
+                selectedReportType === 'vacation_pay_ledger'
+                  ? handlePrintIndividualVacationLedger
+                  : undefined
+              }
               onExport={handleExport}
               onRefresh={handleRefresh}
               isGrouped={reportSummary?.group_by_applied && reportSummary.group_by_applied.length > 0}

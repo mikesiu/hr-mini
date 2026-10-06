@@ -1,11 +1,20 @@
 import axios from 'axios';
 
 // Dynamically determine API URL based on how the frontend is accessed
-// When accessed via IP (e.g., 192.168.1.77:3000), use that same IP for API calls
+// - CRA dev server (port 3000): call the FastAPI port directly
+// - Production / desktop (.exe) single-server mode: same-origin /api
 const getApiBaseUrl = () => {
-  // Full URL override (e.g. http://localhost:8888/api)
+  // Full URL override (e.g. http://localhost:8888/api or /api)
   if (process.env.REACT_APP_API_URL) {
     return process.env.REACT_APP_API_URL;
+  }
+
+  const isCreateReactAppDev =
+    process.env.NODE_ENV === 'development' && window.location.port === '3000';
+
+  // Packaged app and `npm run build` served by FastAPI share one origin.
+  if (!isCreateReactAppDev) {
+    return '/api';
   }
 
   // Keep default aligned with backend/start-backend.bat
@@ -116,10 +125,14 @@ export interface EmployeeDeleteResponse {
 
 // Employee API
 export const employeeAPI = {
-  list: (params?: { q?: string; company_id?: string }) => 
-    apiClient.get('/employees/list', { params }),
+  list: (params?: {
+    q?: string;
+    company_id?: string;
+    pay_period_start?: string;
+    pay_period_end?: string;
+  }) => apiClient.get('/employees/list', { params }),
   get: (id: string) => apiClient.get(`/employees/${id}`),
-  create: (data: any) => apiClient.post('/employees', data),
+  create: (data: any) => apiClient.post('/employees/', data),
   update: (id: string, data: any) => apiClient.put(`/employees/${id}`, data),
   delete: (id: string) => apiClient.delete<EmployeeDeleteResponse>(`/employees/${id}`),
   // Upload functionality

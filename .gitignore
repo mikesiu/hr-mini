@@ -15,6 +15,12 @@ backups/
 .env
 *.env
 
+# ===== Frontend / packaging build output =====
+frontend/build/
+build/
+dist/
+*.spec.bak
+
 # ===== OS / editor =====
 .vscode/
 .idea/

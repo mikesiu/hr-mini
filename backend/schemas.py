@@ -1051,7 +1051,7 @@ class AttendanceDetailRow(BaseModel):
     date: str
     check_in: Optional[str] = None
     check_out: Optional[str] = None
-    day_type: str  # "Weekday" or "Weekend"
+    day_type: str  # e.g. "Monday", "Tuesday", ...
     regular_hours: float
     ot_hours: float
     weekend_ot_hours: float

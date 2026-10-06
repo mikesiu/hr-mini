@@ -103,6 +103,17 @@ def test_union_and_non_union_schedules_are_independent():
     assert resolve_vacation_percent_from_tiers(union, years) == Decimal("8")
 
 
+def test_vacation_days_from_percent_mapping():
+    from services.leave_service import vacation_days_from_percent
+
+    assert vacation_days_from_percent(4) == 10.0
+    assert vacation_days_from_percent(6) == 15.0
+    assert vacation_days_from_percent(8) == 20.0
+    assert vacation_days_from_percent(10) == 25.0
+    assert vacation_days_from_percent(None) == 0.0
+    assert vacation_days_from_percent(5) == 12.5
+
+
 def test_to_hourly_rate():
     assert to_hourly_rate(25.0, "Hourly") == 25.0
     assert abs(to_hourly_rate(2080 * 20, "Annual") - 20.0) < 0.001
@@ -242,6 +253,7 @@ if __name__ == "__main__":
     test_tier_gap_does_not_jump_to_highest()
     test_harjit_anniversary_sep_2026()
     test_union_and_non_union_schedules_are_independent()
+    test_vacation_days_from_percent_mapping()
     test_to_hourly_rate()
     test_running_vacation_balance_math()
     test_leave_days_overlapping_full_and_partial()

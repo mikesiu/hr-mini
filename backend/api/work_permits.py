@@ -12,6 +12,7 @@ from repos.employee_repo import get_employee
 
 router = APIRouter()
 
+@router.get("", response_model=List[WorkPermitResponse])
 @router.get("/", response_model=List[WorkPermitResponse])
 async def list_work_permits(
     employee_id: Optional[str] = Query(None, description="Filter by employee ID"),
@@ -81,6 +82,7 @@ async def get_work_permit(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching work permit: {str(e)}")
 
+@router.post("", response_model=WorkPermitResponse)
 @router.post("/", response_model=WorkPermitResponse)
 async def create_work_permit_endpoint(
     work_permit_data: WorkPermitCreate,

@@ -64,6 +64,45 @@ def overlaps(employee_id: str, start: date, end: date) -> bool:
         return exists > 0
 
 
+def list_overlapping_leaves(
+    employee_id: str,
+    start: date,
+    end: date,
+    *,
+    exclude_leave_id: int | None = None,
+) -> List[Leave]:
+    """Active (non-cancelled) leaves overlapping [start, end], optionally excluding one id."""
+    with SessionLocal() as session:
+        stmt = (
+            select(Leave)
+            .where(
+                and_(
+                    Leave.employee_id == employee_id,
+                    Leave.status != "Cancelled",
+                    Leave.start_date <= end,
+                    Leave.end_date >= start,
+                )
+            )
+            .order_by(Leave.start_date, Leave.id)
+        )
+        if exclude_leave_id is not None:
+            stmt = stmt.where(Leave.id != exclude_leave_id)
+        return list(session.execute(stmt).scalars().all())
+
+
+def leave_day_portion(start: date, end: date, days: float, day: date) -> float:
+    """
+    How much of a leave application counts against a single calendar day.
+    Single-day leave: use the leave's days value (e.g. 0.5 or 1.0).
+    Multi-day leave: each covered day counts as a full day.
+    """
+    if day < start or day > end:
+        return 0.0
+    if start == end:
+        return float(days or 0.0)
+    return 1.0
+
+
 def create_leave(
     employee_id: str,
     leave_type_code: str,
@@ -107,6 +146,11 @@ def create_leave(
 def list_leave_types() -> list[LeaveType]:
     with SessionLocal() as session:
         return session.execute(select(LeaveType).order_by(LeaveType.code)).scalars().all()
+
+
+def get_leave(leave_id: int) -> Optional[Leave]:
+    with SessionLocal() as session:
+        return session.get(Leave, leave_id)
 
 
 def update_leave(
