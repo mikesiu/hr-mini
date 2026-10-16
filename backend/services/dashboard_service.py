@@ -8,6 +8,7 @@ from sqlalchemy import select
 from models.base import SessionLocal
 from models.company import Company
 from models.employee import Employee
+from models.work_permit import WorkPermit
 from schemas import PayrollCalendarEvent
 from repos.employment_repo import get_current_employment, get_company_by_id
 
@@ -220,10 +221,48 @@ def get_probation_events(start_date: date, end_date: date) -> List[PayrollCalend
     return events
 
 
+def get_work_permit_events(start_date: date, end_date: date) -> List[PayrollCalendarEvent]:
+    """
+    Get work permit expiry events within the given date range (terminated staff excluded).
+    """
+    events = []
+
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(WorkPermit, Employee)
+            .join(Employee, Employee.id == WorkPermit.employee_id)
+            .where(WorkPermit.expiry_date >= start_date)
+            .where(WorkPermit.expiry_date <= end_date)
+            .where(Employee.status != "Terminated")
+        ).all()
+
+        for permit, employee in rows:
+            try:
+                employment = (
+                    get_current_employment(employee.id, as_of_date=permit.expiry_date)
+                    or get_current_employment(employee.id)
+                )
+                if not employment:
+                    continue
+                company = get_company_by_id(employment.company_id)
+                events.append(PayrollCalendarEvent(
+                    date=permit.expiry_date,
+                    company_id=employment.company_id,
+                    company_name=company.legal_name if company else employment.company_id,
+                    event_type="work_permit",
+                    description=f"Work Permit Expires - {employee.full_name} ({permit.permit_type})"
+                ))
+            except Exception as e:
+                print(f"Error processing work permit event for employee {employee.id}: {e}")
+                continue
+
+    return events
+
+
 def get_payroll_calendar_data(start_date: date, end_date: date) -> List[PayrollCalendarEvent]:
     """
     Get payroll calendar data for all companies within the given date range.
-    Includes payroll, CRA, union, and probation events.
+    Includes payroll, CRA, union, probation, and work permit expiry events.
     """
     all_events = []
     
@@ -247,6 +286,11 @@ def get_payroll_calendar_data(start_date: date, end_date: date) -> List[PayrollC
     except Exception as e:
         # Log error but continue
         print(f"Error fetching probation events: {e}")
+
+    try:
+        all_events.extend(get_work_permit_events(start_date, end_date))
+    except Exception as e:
+        print(f"Error fetching work permit events: {e}")
     
     # Sort events by date
     return sorted(all_events, key=lambda x: x.date)

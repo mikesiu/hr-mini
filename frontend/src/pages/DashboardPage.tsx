@@ -29,18 +29,18 @@ import {
   Groups as UnionIcon,
   CalendarToday as CalendarIcon,
   Person as PersonIcon,
+  Assignment as WorkPermitIcon,
 } from '@mui/icons-material';
 import { format, startOfMonth, addMonths } from 'date-fns';
 import { dashboardAPI, holidayAPI } from '../api/client';
 import { useCompanyFilter } from '../hooks/useCompanyFilter';
 import PayrollCalendar from '../components/dashboard/PayrollCalendar';
-import WorkPermitAlertCard from '../components/dashboard/WorkPermitAlertCard';
 
 interface PayrollEvent {
   date: string;
   company_id: string;
   company_name: string;
-  event_type: 'payroll' | 'cra' | 'union' | 'holiday' | 'probation';
+  event_type: 'payroll' | 'cra' | 'union' | 'holiday' | 'probation' | 'work_permit';
   description: string;
 }
 
@@ -215,6 +215,8 @@ const DashboardPage: React.FC = () => {
         return <CalendarIcon />;
       case 'probation':
         return <PersonIcon />;
+      case 'work_permit':
+        return <WorkPermitIcon />;
       default:
         return <CalendarIcon />;
     }
@@ -232,6 +234,8 @@ const DashboardPage: React.FC = () => {
         return 'secondary'; // Use secondary (pink/magenta) for better distinction from blue payroll
       case 'probation':
         return 'info'; // Use info (cyan/blue) for probation reminders
+      case 'work_permit':
+        return 'error';
       default:
         return 'default';
     }
@@ -365,10 +369,6 @@ const DashboardPage: React.FC = () => {
           </>
         )}
       </Paper>
-
-      {/* Work permit expiry alerts (terminated staff excluded by API) */}
-      <WorkPermitAlertCard />
-
       {/* Legend */}
       <Paper sx={{ p: 2, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
@@ -415,6 +415,14 @@ const DashboardPage: React.FC = () => {
               variant="outlined"
             />
           </Grid>
+          <Grid item>
+            <Chip
+              icon={<WorkPermitIcon />}
+              label="Work Permit Expiry"
+              color="error"
+              variant="outlined"
+            />
+          </Grid>
         </Grid>
       </Paper>
 
@@ -456,7 +464,7 @@ const DashboardPage: React.FC = () => {
                       primary={
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                           <Chip
-                            label={event.event_type.toUpperCase()}
+                            label={event.event_type === 'work_permit' ? 'WORK PERMIT' : event.event_type.toUpperCase()}
                             color={getEventColor(event.event_type) as any}
                             size="small"
                           />

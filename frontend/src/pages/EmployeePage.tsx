@@ -93,7 +93,7 @@ const EmployeePage: React.FC = () => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('ActiveProbation');
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [employeeToDelete, setEmployeeToDelete] = useState<Employee | null>(null);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
@@ -591,16 +591,41 @@ const EmployeePage: React.FC = () => {
     if (globalSelectedEmployee) {
       return emp.id === globalSelectedEmployee.id;
     }
+    if (statusFilter === 'ActiveProbation') {
+      return emp.status === 'Active' || emp.status === 'Probation';
+    }
     if (statusFilter === 'All') {
       return emp.status !== 'Terminated';
+    }
+    if (statusFilter === 'AllIncludingTerminated') {
+      return true;
+    }
+    if (statusFilter === 'OnLeaveProbation') {
+      return emp.status === 'On Leave' || emp.status === 'Probation';
     }
     return emp.status === statusFilter;
   });
 
-  const totalEmployees = employees.length;
-  const activeEmployees = employees.filter(emp => emp.status === 'Active').length;
-  const onLeaveEmployees = employees.filter(emp => emp.status === 'On Leave' || emp.status === 'Probation').length;
-  const terminatedEmployees = employees.filter(emp => emp.status === 'Terminated').length;
+  const statCards = [
+    {
+      filter: 'All',
+      label: 'Total Employees',
+      color: theme.palette.primary.main,
+      count: employees.filter(emp => emp.status !== 'Terminated').length,
+    },
+    {
+      filter: 'Active',
+      label: 'Active',
+      color: theme.palette.success.main,
+      count: employees.filter(emp => emp.status === 'Active').length,
+    },
+    {
+      filter: 'OnLeaveProbation',
+      label: 'On Leave and On Probation',
+      color: theme.palette.warning.main,
+      count: employees.filter(emp => emp.status === 'On Leave' || emp.status === 'Probation').length,
+    },
+  ];
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -701,46 +726,44 @@ const EmployeePage: React.FC = () => {
         
         {/* Statistics Cards */}
         <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid item xs={12} sm={6} md={3}>
-            <Paper sx={{ p: 1.5, textAlign: 'center', background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.1)} 0%, ${alpha(theme.palette.primary.main, 0.05)} 100%)` }}>
-              <Typography variant="h5" color="primary" sx={{ fontWeight: 700 }}>
-                {totalEmployees}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
-                Total Employees
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Paper sx={{ p: 1.5, textAlign: 'center', background: `linear-gradient(135deg, ${alpha(theme.palette.success.main, 0.1)} 0%, ${alpha(theme.palette.success.main, 0.05)} 100%)` }}>
-              <Typography variant="h5" color="success.main" sx={{ fontWeight: 700 }}>
-                {activeEmployees}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
-                Active
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Paper sx={{ p: 1.5, textAlign: 'center', background: `linear-gradient(135deg, ${alpha(theme.palette.warning.main, 0.1)} 0%, ${alpha(theme.palette.warning.main, 0.05)} 100%)` }}>
-              <Typography variant="h5" color="warning.main" sx={{ fontWeight: 700 }}>
-                {onLeaveEmployees}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
-                On Leave and On Probation
-              </Typography>
-            </Paper>
-          </Grid>
-          <Grid item xs={12} sm={6} md={3}>
-            <Paper sx={{ p: 1.5, textAlign: 'center', background: `linear-gradient(135deg, ${alpha(theme.palette.info.main, 0.1)} 0%, ${alpha(theme.palette.info.main, 0.05)} 100%)` }}>
-              <Typography variant="h5" color="info.main" sx={{ fontWeight: 700 }}>
-                {terminatedEmployees}
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
-                Terminated
-              </Typography>
-            </Paper>
-          </Grid>
+          {statCards.map((card) => {
+            const selected = statusFilter === card.filter;
+            return (
+              <Grid item xs={12} sm={4} key={card.filter}>
+                <Paper
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    setGlobalSelectedEmployee(null);
+                    setStatusFilter(card.filter);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setGlobalSelectedEmployee(null);
+                      setStatusFilter(card.filter);
+                    }
+                  }}
+                  sx={{
+                    p: 1.5,
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    border: `2px solid ${selected ? card.color : 'transparent'}`,
+                    background: `linear-gradient(135deg, ${alpha(card.color, selected ? 0.2 : 0.1)} 0%, ${alpha(card.color, 0.05)} 100%)`,
+                    transition: 'box-shadow 0.15s, border-color 0.15s',
+                    '&:hover': { boxShadow: 3 },
+                  }}
+                >
+                  <Typography variant="h5" sx={{ fontWeight: 700, color: card.color }}>
+                    {card.count}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
+                    {card.label}
+                  </Typography>
+                </Paper>
+              </Grid>
+            );
+          })}
         </Grid>
       </Box>
 
@@ -783,7 +806,7 @@ const EmployeePage: React.FC = () => {
             }}
             placeholder="Search by name, ID, email..."
           />
-          <FormControl sx={{ minWidth: 160 }} size="small">
+          <FormControl sx={{ minWidth: 220 }} size="small">
             <InputLabel>Status Filter</InputLabel>
             <Select
               value={statusFilter}
@@ -793,8 +816,11 @@ const EmployeePage: React.FC = () => {
                 backgroundColor: 'background.paper',
               }}
             >
-              <MenuItem value="All">All Employees</MenuItem>
+              <MenuItem value="ActiveProbation">Active & Probation</MenuItem>
+              <MenuItem value="All">All (excluding terminated)</MenuItem>
+              <MenuItem value="AllIncludingTerminated">All (including terminated)</MenuItem>
               <MenuItem value="Active">Active</MenuItem>
+              <MenuItem value="OnLeaveProbation">On Leave & Probation</MenuItem>
               <MenuItem value="On Leave">On Leave</MenuItem>
               <MenuItem value="Terminated">Terminated</MenuItem>
               <MenuItem value="Probation">Probation</MenuItem>
@@ -819,7 +845,7 @@ const EmployeePage: React.FC = () => {
             variant="outlined"
             onClick={() => {
               setSearchTerm('');
-              setStatusFilter('All');
+              setStatusFilter('ActiveProbation');
               loadEmployees();
             }}
             disabled={loading}

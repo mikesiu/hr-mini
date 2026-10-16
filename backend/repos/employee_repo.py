@@ -86,11 +86,15 @@ def search_employees(q: str = ""):
     with SessionLocal() as session:
         stmt = select(Employee)
         if q:
-            like = f"%{q}%"
+            like = f"%{q.strip()}%"
+            first = func.coalesce(Employee.first_name, "")
+            last = func.coalesce(Employee.last_name, "")
             stmt = stmt.where(
                 (Employee.first_name.ilike(like))
                 | (Employee.last_name.ilike(like))
                 | (Employee.id.ilike(like))
+                | ((first + " " + last).ilike(like))
+                | ((last + " " + first).ilike(like))
             )
         return session.execute(stmt).scalars().all()
 
@@ -141,11 +145,15 @@ def list_employees_for_period(
         )
 
         if q:
-            like = f"%{q}%"
+            like = f"%{q.strip()}%"
+            first = func.coalesce(Employee.first_name, "")
+            last = func.coalesce(Employee.last_name, "")
             stmt = stmt.where(
                 (Employee.first_name.ilike(like))
                 | (Employee.last_name.ilike(like))
                 | (Employee.id.ilike(like))
+                | ((first + " " + last).ilike(like))
+                | ((last + " " + first).ilike(like))
             )
 
         stmt = stmt.order_by(Employee.last_name, Employee.first_name)

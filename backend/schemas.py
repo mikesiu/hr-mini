@@ -269,7 +269,7 @@ class EmploymentBase(BaseModel):
     end_date: Optional[date] = None
     is_active: bool = True
     remarks: Optional[str] = None
-    wage_classification: Optional[str] = Field(None, max_length=100)
+    employee_type: Optional[str] = Field(None, max_length=50)
     is_driver: bool = False
     count_all_ot: bool = False
     
@@ -312,13 +312,14 @@ class EmploymentCreate(EmploymentBase):
     pass
 
 class EmploymentUpdate(BaseModel):
+    company_id: Optional[str] = Field(None, max_length=50)
     position: Optional[str] = Field(None, max_length=100)
     department: Optional[str] = Field(None, max_length=100)
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     is_active: Optional[bool] = None
     remarks: Optional[str] = None
-    wage_classification: Optional[str] = Field(None, max_length=100)
+    employee_type: Optional[str] = Field(None, max_length=50)
     is_driver: Optional[bool] = None
     count_all_ot: Optional[bool] = None
     
@@ -367,7 +368,7 @@ class EmploymentResponse(BaseModel):
     end_date: Optional[str] = None  # Always serialized as string
     is_active: bool = True
     remarks: Optional[str] = None
-    wage_classification: Optional[str] = None
+    employee_type: Optional[str] = None
     count_all_ot: bool = False
     is_driver: bool = False
     employee: Optional[EmployeeResponse] = None
@@ -503,6 +504,7 @@ class SalaryHistoryBase(BaseModel):
     effective_date: date
     end_date: Optional[date] = None
     notes: Optional[str] = None
+    wage_classification: Optional[str] = Field(None, max_length=100)
 
 class SalaryHistoryCreate(SalaryHistoryBase):
     pass
@@ -513,6 +515,7 @@ class SalaryHistoryUpdate(BaseModel):
     effective_date: Optional[date] = None
     end_date: Optional[date] = None
     notes: Optional[str] = None
+    wage_classification: Optional[str] = Field(None, max_length=100)
 
 class SalaryHistoryResponse(SalaryHistoryBase):
     id: int
@@ -529,6 +532,7 @@ class SalaryProgressionResponse(BaseModel):
     effective_date: date
     end_date: Optional[date] = None
     notes: Optional[str] = None
+    wage_classification: Optional[str] = None
     created_at: datetime
 
 # Work Permit schemas

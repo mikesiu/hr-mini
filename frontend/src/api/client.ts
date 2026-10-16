@@ -198,6 +198,27 @@ export const holidayAPI = {
     }),
 };
 
+export type CodeCategory = 'employee_type' | 'wage_classification' | 'department' | 'position';
+
+export interface CodeValue {
+  id: number;
+  category: CodeCategory;
+  code: string;
+  description?: string | null;
+  sort_order: number;
+  is_active: boolean;
+}
+
+export const codeAPI = {
+  categories: () => apiClient.get<{ key: CodeCategory; label: string }[]>('/codes/categories'),
+  list: (params?: { category?: CodeCategory; active_only?: boolean }) =>
+    apiClient.get<CodeValue[]>('/codes/', { params }),
+  create: (data: Omit<CodeValue, 'id'>) => apiClient.post<CodeValue>('/codes/', data),
+  update: (id: number, data: Partial<Omit<CodeValue, 'id' | 'category'>>) =>
+    apiClient.put<CodeValue>(`/codes/${id}`, data),
+  delete: (id: number) => apiClient.delete(`/codes/${id}`),
+};
+
 // Company API
 export const companyAPI = {
   list: (params?: { search?: string }) => apiClient.get('/companies', { params }),

@@ -52,6 +52,7 @@ import { salaryAPI, apiClient } from '../api/client';
 import { useSelectedEmployee } from '../contexts/SelectedEmployeeContext';
 import { useCompanyFilter } from '../hooks/useCompanyFilter';
 import SalaryProgressionChart from '../components/SalaryProgressionChart';
+import CodeSelect from '../components/CodeSelect';
 
 interface SalaryRecord {
   id: number;
@@ -61,6 +62,7 @@ interface SalaryRecord {
   effective_date: string;
   end_date?: string;
   notes?: string;
+  wage_classification?: string | null;
   created_at: string;
   updated_at?: string;
   employee?: {
@@ -133,6 +135,7 @@ const SalaryPage: React.FC = () => {
     effective_date: new Date(),
     end_date: null as Date | null,
     notes: '',
+    wage_classification: '',
   });
   
   // Employee search states
@@ -333,6 +336,7 @@ const SalaryPage: React.FC = () => {
         effective_date: new Date(record.effective_date),
         end_date: record.end_date ? new Date(record.end_date) : null,
         notes: record.notes || '',
+        wage_classification: record.wage_classification || '',
       });
     } else {
       setEditingRecord(null);
@@ -343,6 +347,7 @@ const SalaryPage: React.FC = () => {
         effective_date: new Date(),
         end_date: null,
         notes: '',
+        wage_classification: currentSalary?.wage_classification || '',
       });
     }
     setDialogOpen(true);
@@ -729,6 +734,9 @@ const SalaryPage: React.FC = () => {
                       <Typography variant="body2" color="text.secondary" mb={1}>
                         <strong>Effective Date:</strong> {formatDateString(currentSalary.effective_date)}
                       </Typography>
+                      <Typography variant="body2" color="text.secondary" mb={1}>
+                        <strong>Wage Classification:</strong> {currentSalary.wage_classification || '-'}
+                      </Typography>
                       {currentSalary.notes && (
                         <Typography variant="body2" color="text.secondary">
                           <strong>Notes:</strong> {currentSalary.notes}
@@ -801,6 +809,7 @@ const SalaryPage: React.FC = () => {
                       <TableRow>
                         <TableCell>Pay Rate</TableCell>
                         <TableCell>Pay Type</TableCell>
+                        <TableCell>Wage Classification</TableCell>
                         <TableCell>Effective Date</TableCell>
                         <TableCell>End Date</TableCell>
                         <TableCell>Status</TableCell>
@@ -826,6 +835,7 @@ const SalaryPage: React.FC = () => {
                               size="small"
                             />
                           </TableCell>
+                          <TableCell>{record.wage_classification || '-'}</TableCell>
                           <TableCell>
                             <Box display="flex" alignItems="center" gap={1}>
                               <CalendarIcon fontSize="small" />
@@ -960,6 +970,12 @@ const SalaryPage: React.FC = () => {
                   ))}
                 </Select>
               </FormControl>
+              <CodeSelect
+                category="wage_classification"
+                label="Wage Classification"
+                value={formData.wage_classification}
+                onChange={(wage_classification) => setFormData({ ...formData, wage_classification })}
+              />
               <TextField
                 label="Effective Date"
                 type="date"

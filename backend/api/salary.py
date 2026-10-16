@@ -43,6 +43,7 @@ async def list_salary_history(
                     effective_date=record.effective_date,
                     end_date=record.end_date,
                     notes=record.notes,
+                    wage_classification=record.wage_classification,
                     created_at=record.created_at,
                     updated_at=record.updated_at,
                     employee=employee
@@ -61,6 +62,7 @@ async def list_salary_history(
                     effective_date=record['salary'].effective_date,
                     end_date=record['salary'].end_date,
                     notes=record['salary'].notes,
+                    wage_classification=record['salary'].wage_classification,
                     created_at=record['salary'].created_at,
                     updated_at=record['salary'].updated_at,
                     employee=record['employee']
@@ -79,6 +81,7 @@ async def list_salary_history(
                     effective_date=record['salary'].effective_date,
                     end_date=record['salary'].end_date,
                     notes=record['salary'].notes,
+                    wage_classification=record['salary'].wage_classification,
                     created_at=record['salary'].created_at,
                     updated_at=record['salary'].updated_at,
                     employee=record['employee']
@@ -114,6 +117,7 @@ async def get_salary_record(
                 effective_date=salary_record.effective_date,
                 end_date=salary_record.end_date,
                 notes=salary_record.notes,
+                wage_classification=salary_record.wage_classification,
                 created_at=salary_record.created_at,
                 updated_at=salary_record.updated_at,
                 employee=employee
@@ -137,6 +141,7 @@ async def create_salary_record_endpoint(
             effective_date=salary_data.effective_date,
             end_date=salary_data.end_date,
             notes=salary_data.notes,
+            wage_classification=salary_data.wage_classification,
             performed_by=current_user.get('username')
         )
         
@@ -150,6 +155,7 @@ async def create_salary_record_endpoint(
             effective_date=salary_record.effective_date,
             end_date=salary_record.end_date,
             notes=salary_record.notes,
+            wage_classification=salary_record.wage_classification,
             created_at=salary_record.created_at,
             updated_at=salary_record.updated_at,
             employee=employee
@@ -172,6 +178,9 @@ async def update_salary_record_endpoint(
         for field, value in salary_data.dict().items():
             if value is not None:
                 update_data[field] = value
+        # A blank end date means "clear it" (record becomes the current salary)
+        if "end_date" in salary_data.__fields_set__ and salary_data.end_date is None:
+            update_data["end_date"] = None
         
         if not update_data:
             # No fields to update, return current record
@@ -194,6 +203,7 @@ async def update_salary_record_endpoint(
                     effective_date=salary_record.effective_date,
                     end_date=salary_record.end_date,
                     notes=salary_record.notes,
+                    wage_classification=salary_record.wage_classification,
                     created_at=salary_record.created_at,
                     updated_at=salary_record.updated_at,
                     employee=employee
@@ -218,6 +228,7 @@ async def update_salary_record_endpoint(
                 effective_date=salary_record.effective_date,
                 end_date=salary_record.end_date,
                 notes=salary_record.notes,
+                wage_classification=salary_record.wage_classification,
                 created_at=salary_record.created_at,
                 updated_at=salary_record.updated_at,
                 employee=employee
@@ -271,6 +282,7 @@ async def get_current_salary_endpoint(
             effective_date=salary_record.effective_date,
             end_date=salary_record.end_date,
             notes=salary_record.notes,
+            wage_classification=salary_record.wage_classification,
             created_at=salary_record.created_at,
             updated_at=salary_record.updated_at,
             employee=employee
@@ -295,6 +307,7 @@ async def get_salary_progression(
                 effective_date=record['effective_date'],
                 end_date=record['end_date'],
                 notes=record['notes'],
+                wage_classification=record['wage_classification'],
                 created_at=record['created_at']
             )
             for record in progression

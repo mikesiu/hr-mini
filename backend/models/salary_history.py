@@ -19,6 +19,7 @@ class SalaryHistory(Base):
     effective_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=True)  # NULL for current salary
     notes = Column(Text, nullable=True)
+    wage_classification = Column(String(100), nullable=True)  # Code value: wage_classification
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, onupdate=func.now())
 

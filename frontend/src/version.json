@@ -1,0 +1,28 @@
+{
+  "version": "1.1.0",
+  "release_date": "2026-10-15",
+  "history": [
+    {
+      "version": "1.1.0",
+      "date": "2026-10-15",
+      "changes": [
+        "About page with version, release date and change history",
+        "Code Maintenance page (System Management) for Employee Type, Wage Classification, Department and Position",
+        "Employment Management: Employee Type, Department and Position are now dropdowns; company ID shown in the Company dropdown and table",
+        "Wage Classification moved from Employment Management to Salary Management",
+        "Work permit expiry dates shown on the dashboard calendar; Work Permit Alerts section removed",
+        "Employee Information: summary boxes filter the list when clicked; Terminated box removed",
+        "Employee Information: default view is Active & Probation; terminated staff can be found with the status filter",
+        "Employee search matches full names, and terminated staff stay visible under their last company"
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "date": "2026-10-06",
+      "changes": [
+        "Single-exe desktop packaging (HRMini.exe)",
+        "Leave, attendance and reporting updates"
+      ]
+    }
+  ]
+}

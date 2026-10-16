@@ -15,6 +15,8 @@ from models.company import Company
 from services.audit_service import log_action
 from utils.serialization import model_to_dict
 
+_UNSET: Any = object()
+
 
 def validate_salary_date_against_employment(employee_id: str, effective_date: date) -> bool:
     """
@@ -48,6 +50,7 @@ def create_salary_record(
     effective_date: date,
     end_date: Optional[date] = None,
     notes: Optional[str] = None,
+    wage_classification: Optional[str] = None,
     performed_by: Optional[str] = None
 ) -> SalaryHistory:
     """Create a new salary history record."""
@@ -93,7 +96,8 @@ def create_salary_record(
             pay_type=pay_type,
             effective_date=effective_date,
             end_date=end_date,
-            notes=notes
+            notes=notes,
+            wage_classification=wage_classification or None,
         )
         
         session.add(salary_record)
@@ -162,11 +166,12 @@ def update_salary_record(
     pay_rate: Optional[float] = None,
     pay_type: Optional[str] = None,
     effective_date: Optional[date] = None,
-    end_date: Optional[date] = None,
+    end_date: Optional[date] = _UNSET,
     notes: Optional[str] = None,
+    wage_classification: Optional[str] = None,
     performed_by: Optional[str] = None
 ) -> Optional[SalaryHistory]:
-    """Update an existing salary record."""
+    """Update an existing salary record. Pass end_date=None to clear the end date."""
     
     with SessionLocal() as session:
         salary_record = session.get(SalaryHistory, salary_id)
@@ -201,10 +206,26 @@ def update_salary_record(
             salary_record.pay_type = pay_type
         if effective_date is not None:
             salary_record.effective_date = effective_date
-        if end_date is not None:
+        if end_date is None and salary_record.end_date is not None:
+            other_current = session.query(SalaryHistory).filter(
+                and_(
+                    SalaryHistory.employee_id == salary_record.employee_id,
+                    SalaryHistory.end_date.is_(None),
+                    SalaryHistory.id != salary_record.id,
+                )
+            ).first()
+            if other_current:
+                raise ValueError(
+                    "This employee already has a current salary record "
+                    f"(effective {other_current.effective_date.strftime('%Y-%m-%d')}). "
+                    "Set an end date on that record before clearing this one."
+                )
+        if end_date is not _UNSET:
             salary_record.end_date = end_date
         if notes is not None:
             salary_record.notes = notes
+        if wage_classification is not None:
+            salary_record.wage_classification = wage_classification or None
         
         session.commit()
         session.refresh(salary_record)
@@ -267,6 +288,7 @@ def get_salary_progression_report(employee_id: str) -> List[Dict[str, Any]]:
                 'effective_date': salary.effective_date,
                 'end_date': salary.end_date,
                 'notes': salary.notes,
+                'wage_classification': salary.wage_classification,
                 'created_at': salary.created_at
             })
         

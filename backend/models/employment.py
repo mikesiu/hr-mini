@@ -14,7 +14,7 @@ class Employment(Base):
     start_date = Column(Date)
     end_date = Column(Date)
     notes = Column(Text)
-    wage_classification = Column(String(100))  # Wage Classification field
+    employee_type = Column(String(50))  # Code value: employee_type
     is_driver = Column(Boolean, default=False)  # Driver flag for overtime calculation
     count_all_ot = Column(Boolean, default=False)  # Flag to count OT even if less than 30 minutes
     

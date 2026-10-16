@@ -36,6 +36,7 @@ import { employmentAPI, employeeAPI } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useSelectedEmployee } from '../contexts/SelectedEmployeeContext';
 import { useCompanyFilter } from '../hooks/useCompanyFilter';
+import CodeSelect from '../components/CodeSelect';
 
 interface Employment {
   id: number;
@@ -47,7 +48,7 @@ interface Employment {
   end_date?: string;
   is_active: boolean;
   remarks?: string;
-  wage_classification?: string;
+  employee_type?: string;
   count_all_ot?: boolean;
   is_driver?: boolean;
 }
@@ -82,7 +83,7 @@ const EmploymentPage: React.FC = () => {
     start_date: '',
     end_date: '',
     remarks: '',
-    wage_classification: '',
+    employee_type: '',
     count_all_ot: false,
     is_driver: false,
   });
@@ -244,7 +245,7 @@ const EmploymentPage: React.FC = () => {
         start_date: employment.start_date,
         end_date: employment.end_date || '',
         remarks: employment.remarks || '',
-        wage_classification: employment.wage_classification || '',
+        employee_type: employment.employee_type || '',
         count_all_ot: employment.count_all_ot || false,
         is_driver: employment.is_driver || false,
       });
@@ -260,7 +261,7 @@ const EmploymentPage: React.FC = () => {
         start_date: '',
         end_date: '',
         remarks: '',
-        wage_classification: '',
+        employee_type: '',
         count_all_ot: false,
         is_driver: false,
       });
@@ -279,7 +280,7 @@ const EmploymentPage: React.FC = () => {
       start_date: '',
       end_date: '',
       remarks: '',
-      wage_classification: '',
+      employee_type: '',
       count_all_ot: false,
       is_driver: false,
     });
@@ -326,8 +327,10 @@ const EmploymentPage: React.FC = () => {
         return employee ? employee.full_name : params.row.employee_id;
       }
     },
+    { field: 'company_id', headerName: 'Company', width: 100 },
     { field: 'position', headerName: 'Position', width: 150 },
-    { field: 'department', headerName: 'Department', width: 150 },
+    { field: 'department', headerName: 'Department', width: 130 },
+    { field: 'employee_type', headerName: 'Employee Type', width: 120 },
     { 
       field: 'start_date', 
       headerName: 'Start Date', 
@@ -748,28 +751,28 @@ const EmploymentPage: React.FC = () => {
               </FormControl>
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
+              <CodeSelect
+                category="position"
                 label="Position"
                 value={formData.position}
-                onChange={(e) => setFormData({ ...formData, position: e.target.value })}
+                onChange={(position) => setFormData({ ...formData, position })}
                 required
               />
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
+              <CodeSelect
+                category="department"
                 label="Department"
                 value={formData.department}
-                onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                onChange={(department) => setFormData({ ...formData, department })}
               />
             </Grid>
             <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Wage Classification"
-                value={formData.wage_classification}
-                onChange={(e) => setFormData({ ...formData, wage_classification: e.target.value })}
+              <CodeSelect
+                category="employee_type"
+                label="Employee Type"
+                value={formData.employee_type}
+                onChange={(employee_type) => setFormData({ ...formData, employee_type })}
               />
             </Grid>
             <Grid item xs={12} sm={6}>
@@ -804,7 +807,7 @@ const EmploymentPage: React.FC = () => {
                 >
                   {companies.map((company) => (
                     <MenuItem key={company.id} value={company.id}>
-                      {company.legal_name}
+                      {company.id} - {company.legal_name}
                       {company.trade_name ? ` (${company.trade_name})` : ''}
                     </MenuItem>
                   ))}

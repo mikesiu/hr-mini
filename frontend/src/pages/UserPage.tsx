@@ -1050,7 +1050,8 @@ const RoleDialog: React.FC<{
     'work_permit:view', 'work_permit:create', 'work_permit:edit', 'work_permit:delete', 'work_permit:manage',
     'employment:view', 'employment:create', 'employment:edit', 'employment:delete', 'employment:manage',
     'report:view', 'report:export',
-    'audit:view'
+    'audit:view',
+    'code:manage'
   ];
 
   useEffect(() => {

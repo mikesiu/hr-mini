@@ -22,7 +22,8 @@ def create_employment(
     start_date: date | None = None,
     end_date: date | None = None,
     notes: str | None = None,
-    wage_classification: str | None = None,
+    employee_type: str | None = None,
+    is_driver: bool | None = None,
     count_all_ot: bool | None = None,
     performed_by: str | None = None,
 ) -> Employment:
@@ -35,7 +36,8 @@ def create_employment(
             start_date=start_date,
             end_date=end_date,
             notes=notes,
-            wage_classification=wage_classification,
+            employee_type=employee_type,
+            is_driver=is_driver if is_driver is not None else False,
             count_all_ot=count_all_ot if count_all_ot is not None else False,
         )
         session.add(employment)
@@ -91,6 +93,19 @@ def get_current_employment(employee_id: str, as_of_date: Optional[date] = None) 
                 .where(
                     (Employment.end_date.is_(None)) | (Employment.end_date >= as_of_date)
                 )
+                .order_by(desc(Employment.start_date))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+
+def get_latest_employment(employee_id: str) -> Optional[Employment]:
+    """Get the most recent employment record regardless of end date (e.g. for terminated employees)"""
+    with SessionLocal() as session:
+        return (
+            session.execute(
+                select(Employment)
+                .where(Employment.employee_id == employee_id)
                 .order_by(desc(Employment.start_date))
                 .limit(1)
             )

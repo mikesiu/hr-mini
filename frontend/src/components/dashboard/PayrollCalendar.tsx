@@ -14,7 +14,7 @@ interface PayrollEvent {
   date: string;
   company_id: string;
   company_name: string;
-  event_type: 'payroll' | 'cra' | 'union' | 'holiday' | 'probation';
+  event_type: 'payroll' | 'cra' | 'union' | 'holiday' | 'probation' | 'work_permit';
   description: string;
 }
 
@@ -66,6 +66,8 @@ const PayrollCalendar: React.FC<PayrollCalendarProps> = ({ month, events, onDate
         return '#9c27b0'; // Purple color for better distinction from blue payroll
       case 'probation':
         return theme.palette.info.main; // Cyan/blue color for probation reminders
+      case 'work_permit':
+        return theme.palette.error.main;
       default:
         return theme.palette.grey[500];
     }
@@ -84,6 +86,8 @@ const PayrollCalendar: React.FC<PayrollCalendarProps> = ({ month, events, onDate
         return '#e1bee7'; // Light purple background
       case 'probation':
         return theme.palette.info.light; // Light cyan/blue background
+      case 'work_permit':
+        return theme.palette.error.light;
       default:
         return theme.palette.grey[200];
     }
@@ -170,7 +174,7 @@ const PayrollCalendar: React.FC<PayrollCalendarProps> = ({ month, events, onDate
                       placement="top"
                     >
                       <Chip
-                        label={event.event_type === 'holiday' ? 'HOLIDAY' : event.event_type.toUpperCase()}
+                        label={event.event_type === 'work_permit' ? 'PERMIT' : event.event_type.toUpperCase()}
                         size="small"
                         sx={{
                           fontSize: '0.6rem',

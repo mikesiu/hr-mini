@@ -11,6 +11,7 @@ from repos.employment_repo import (
     get_current_employment, update_employment, delete_employment,
     get_employment_with_details, search_employments
 )
+from repos.company_repo import get_company_by_id
 
 router = APIRouter()
 
@@ -40,7 +41,8 @@ async def list_employment_records(
                 end_date=emp.end_date,
                 is_active=emp.end_date is None,
                 remarks=emp.notes,
-                wage_classification=emp.wage_classification,
+                employee_type=emp.employee_type,
+                is_driver=bool(emp.is_driver),
                 count_all_ot=emp.count_all_ot
             ) for emp in employments]
             return {"success": True, "data": employment_list}
@@ -60,7 +62,8 @@ async def list_employment_records(
                 end_date=emp["employment"].end_date,
                 is_active=emp["employment"].end_date is None,
                 remarks=emp["employment"].notes,
-                wage_classification=emp["employment"].wage_classification,
+                employee_type=emp["employment"].employee_type,
+                is_driver=bool(emp["employment"].is_driver),
                 count_all_ot=emp["employment"].count_all_ot
             ) for emp in employment_data]
             return {"success": True, "data": employment_list}
@@ -88,7 +91,8 @@ async def get_employment_record(
         end_date=employment.end_date,
         is_active=employment.end_date is None,
         remarks=employment.notes,
-        wage_classification=employment.wage_classification,
+        employee_type=employment.employee_type,
+        is_driver=bool(employment.is_driver),
         count_all_ot=employment.count_all_ot,
     )
 
@@ -108,7 +112,8 @@ async def create_employment_record(
             start_date=employment_data.start_date,
             end_date=employment_data.end_date,
             notes=employment_data.remarks,
-            wage_classification=employment_data.wage_classification,
+            employee_type=employment_data.employee_type,
+            is_driver=employment_data.is_driver,
             count_all_ot=employment_data.count_all_ot,
             performed_by=current_user["username"]
         )
@@ -123,7 +128,9 @@ async def create_employment_record(
             end_date=employment.end_date,
             is_active=employment.end_date is None,
             remarks=employment.notes,
-            wage_classification=employment.wage_classification
+            employee_type=employment.employee_type,
+            is_driver=bool(employment.is_driver),
+            count_all_ot=employment.count_all_ot,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -140,7 +147,12 @@ async def update_employment_record(
     update_data = employment_data.dict(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No data provided for update")
-    
+    if "remarks" in update_data:
+        update_data["notes"] = update_data.pop("remarks")
+    update_data.pop("is_active", None)
+    if update_data.get("company_id") and not get_company_by_id(update_data["company_id"]):
+        raise HTTPException(status_code=400, detail=f"Company '{update_data['company_id']}' does not exist")
+
     employment = update_employment(
         employment_id,
         performed_by=current_user["username"],
@@ -160,7 +172,8 @@ async def update_employment_record(
         end_date=employment.end_date,
         is_active=employment.end_date is None,
         remarks=employment.notes,
-        wage_classification=employment.wage_classification,
+        employee_type=employment.employee_type,
+        is_driver=bool(employment.is_driver),
         count_all_ot=employment.count_all_ot,
     )
 

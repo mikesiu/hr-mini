@@ -23,6 +23,8 @@ import ReportsPage from './pages/ReportsPage';
 import TerminationPage from './pages/TerminationPage';
 import WorkSchedulePage from './pages/WorkSchedulePage';
 import AttendancePage from './pages/AttendancePage';
+import CodeMaintenancePage from './pages/CodeMaintenancePage';
+import AboutPage from './pages/AboutPage';
 
 function App() {
   return (
@@ -55,6 +57,8 @@ function App() {
                       <Route path="/reports" element={<ReportsPage />} />
                       <Route path="/terminations" element={<TerminationPage />} />
                       <Route path="/change-password" element={<ChangePasswordPage />} />
+                      <Route path="/codes" element={<CodeMaintenancePage />} />
+                      <Route path="/about" element={<AboutPage />} />
                     </Routes>
                   </AppLayout>
                 </ProtectedRoute>

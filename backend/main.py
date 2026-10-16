@@ -12,7 +12,7 @@ import time
 sys.path.append(str(Path(__file__).parent))
 
 # Import API routes
-from api import auth, employees, employment, leaves, salary, work_permits, expenses, companies, users, audit, reports, dashboard, holidays, termination, work_schedules, attendance, vacation_payroll
+from api import auth, employees, employment, leaves, salary, work_permits, expenses, companies, users, audit, reports, dashboard, holidays, termination, work_schedules, attendance, vacation_payroll, codes
 
 # Create FastAPI app
 app = FastAPI(
@@ -101,6 +101,7 @@ app.include_router(holidays.router, prefix="/api/holidays", tags=["Holidays"])
 app.include_router(termination.router, prefix="/api/terminations", tags=["Terminations"])
 app.include_router(work_schedules.router, prefix="/api/work-schedules", tags=["Work Schedules"])
 app.include_router(attendance.router, prefix="/api/attendance", tags=["Attendance"])
+app.include_router(codes.router, prefix="/api/codes", tags=["Code Values"])
 print("All routes registered successfully!")
 
 # Serve the React production build when present (single-server / desktop mode).
@@ -116,9 +117,12 @@ if _HAS_FRONTEND:
         app.mount("/static", StaticFiles(directory=str(_static_dir)), name="frontend-static")
     print(f"Serving frontend from: {_FRONTEND_BUILD}")
 
+    # index.html must not be cached, or browsers keep loading the previous build's JS after a rebuild
+    _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
     @app.get("/")
     async def root():
-        return FileResponse(_INDEX_HTML)
+        return FileResponse(_INDEX_HTML, headers=_NO_CACHE)
 
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
@@ -132,7 +136,7 @@ if _HAS_FRONTEND:
             raise HTTPException(status_code=404, detail="Not found")
         if candidate.is_file():
             return FileResponse(candidate)
-        return FileResponse(_INDEX_HTML)
+        return FileResponse(_INDEX_HTML, headers=_NO_CACHE)
 else:
     @app.get("/")
     async def root():

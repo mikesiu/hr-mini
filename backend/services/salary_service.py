@@ -165,14 +165,15 @@ class SalaryService:
         if end_date and effective_date and end_date <= effective_date:
             raise ValueError("End date must be after effective date")
         
+        optional = {"end_date": end_date} if end_date is not None else {}
         return update_salary_record(
             salary_id=salary_id,
             pay_rate=pay_rate,
             pay_type=pay_type,
             effective_date=effective_date,
-            end_date=end_date,
             notes=notes,
-            performed_by=performed_by
+            performed_by=performed_by,
+            **optional
         )
     
     @staticmethod

@@ -20,7 +20,7 @@ from repos.employee_repo import (
     update_employee, delete_employee, employee_exists,
     list_employees_for_period,
 )
-from repos.employment_repo import get_current_employment, create_employment
+from repos.employment_repo import get_current_employment, get_latest_employment, create_employment
 from repos.company_repo import get_company_by_id
 # from old_system.app.ui.components.global_company_filter import get_filtered_employees_by_global_company
 
@@ -96,7 +96,7 @@ async def list_employees(
         if company_id:
             filtered_employees = []
             for emp in employees:
-                current_employment = get_current_employment(emp.id)
+                current_employment = get_current_employment(emp.id) or get_latest_employment(emp.id)
                 if current_employment and current_employment.company_id == company_id:
                     filtered_employees.append(emp)
             employees = filtered_employees
@@ -110,7 +110,7 @@ async def list_employees(
             if not current_employment or current_employment.company_id != company_id:
                 current_employment = get_current_employment(emp.id, as_of_date=pay_period_start)
         else:
-            current_employment = get_current_employment(emp.id)
+            current_employment = get_current_employment(emp.id) or get_latest_employment(emp.id)
         emp_company_id = None
         company_short_form = None
         

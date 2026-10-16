@@ -33,7 +33,10 @@ import {
   PersonRemove,
   Schedule,
   AccessTime,
+  ListAlt,
+  InfoOutlined,
 } from '@mui/icons-material';
+import versionInfo from '../version.json';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyFilter } from '../contexts/CompanyFilterContext';
 import CompanyFilter from './CompanyFilter';
@@ -48,7 +51,6 @@ interface AppLayoutProps {
 
 const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard', permission: '', section: 'Overview' },
-  { text: 'Payroll Periods', icon: <CalendarToday />, path: '/payroll-periods', permission: 'company:view', section: 'Overview' },
   { text: 'Employee Information', icon: <People />, path: '/employees', permission: 'employee:view', section: 'Operations' },
   { text: 'Employment Management', icon: <Work />, path: '/employment', permission: 'employment:view', section: 'Operations' },
   { text: 'Salary Management', icon: <AttachMoney />, path: '/salary', permission: 'salary_history:view', section: 'Operations' },
@@ -61,8 +63,11 @@ const menuItems = [
   { text: 'HR Reports', icon: <BarChart />, path: '/reports', permission: 'report:view', section: 'Reports & Analytics' },
   { text: 'Company Management', icon: <Business />, path: '/companies', permission: 'company:manage', section: 'System Management' },
   { text: 'Holiday Management', icon: <CalendarToday />, path: '/holidays', permission: 'holiday:view', section: 'System Management' },
+  { text: 'Payroll Periods', icon: <CalendarToday />, path: '/payroll-periods', permission: 'company:view', section: 'System Management' },
   { text: 'User Management', icon: <Person />, path: '/users', permission: 'user:view', section: 'System Management' },
   { text: 'Audit Report', icon: <Assessment />, path: '/audit', permission: 'audit:view', section: 'System Management' },
+  { text: 'Code Maintenance', icon: <ListAlt />, path: '/codes', permission: 'code:manage', section: 'System Management' },
+  { text: 'About', icon: <InfoOutlined />, path: '/about', permission: '', section: 'System Management' },
 ];
 
 export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
@@ -119,6 +124,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
       >
         <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 600 }}>
           HR Mini
+        </Typography>
+        <Typography
+          variant="caption"
+          color="text.secondary"
+          sx={{ ml: 1, mt: 0.5, cursor: 'pointer' }}
+          onClick={() => navigate('/about')}
+        >
+          v{versionInfo.version}
         </Typography>
       </Toolbar>
       
@@ -241,6 +254,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
           onClose={handleClose}
         >
           <MenuItem onClick={handleChangePassword}>Change My Password</MenuItem>
+          <MenuItem onClick={() => { navigate('/about'); handleClose(); }}>About</MenuItem>
           <MenuItem onClick={handleLogout}>Logout</MenuItem>
         </Menu>
           </Box>
