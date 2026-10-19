@@ -367,6 +367,15 @@ async def upload_attendance_csv(
                 
                 # Get employment (needed for all calculations)
                 employment = get_current_employment(person_id, attendance_date)
+                is_stat_holiday = False
+                if employment and employment.company_id:
+                    holidays = get_holidays_in_range(
+                        employment.company_id,
+                        attendance_date,
+                        attendance_date,
+                        person_id
+                    )
+                    is_stat_holiday = attendance_date in holidays
                 
                 if rounded_check_in and rounded_check_out:
                     # Get employee schedule and employment
@@ -405,29 +414,23 @@ async def upload_attendance_csv(
                     
                     regular, ot, weekend_ot = calculate_hours_worked(
                         rounded_check_in, rounded_check_out, schedule_start, schedule_end,
-                        attendance_date, is_driver, weekday_schedule_start, count_all_ot
+                        attendance_date, is_driver, weekday_schedule_start, count_all_ot,
+                        is_stat_holiday=is_stat_holiday,
                     )
                     regular_hours = regular
                     ot_hours = ot
                     weekend_ot_hours = weekend_ot
                 
                 # Calculate statutory holiday hours if applicable
-                if employment and employment.company_id:
-                    holidays = get_holidays_in_range(
-                        employment.company_id,
+                if is_stat_holiday and employment and employment.company_id:
+                    # Calculate stat holiday entitlement based on BC ESA rules
+                    stat_holiday_hours = calculate_stat_holiday_entitlement(
+                        person_id,
                         attendance_date,
                         attendance_date,
-                        person_id
+                        attendance_date,
+                        employment.company_id
                     )
-                    if attendance_date in holidays:
-                        # Calculate stat holiday entitlement based on BC ESA rules
-                        stat_holiday_hours = calculate_stat_holiday_entitlement(
-                            person_id,
-                            attendance_date,
-                            attendance_date,
-                            attendance_date,
-                            employment.company_id
-                        )
                 
                 # Create attendance record with original times and rounded times
                 create_attendance(
@@ -486,6 +489,15 @@ async def create_attendance_record(
         
         # Get employment (needed for all calculations)
         employment = get_current_employment(attendance_data.employee_id, attendance_data.date)
+        is_stat_holiday = False
+        if employment and employment.company_id:
+            holidays = get_holidays_in_range(
+                employment.company_id,
+                attendance_data.date,
+                attendance_data.date,
+                attendance_data.employee_id
+            )
+            is_stat_holiday = attendance_data.date in holidays
         
         if rounded_check_in and rounded_check_out:
             # Get employee schedule
@@ -524,29 +536,23 @@ async def create_attendance_record(
             
             regular, ot, weekend_ot = calculate_hours_worked(
                 rounded_check_in, rounded_check_out, schedule_start, schedule_end,
-                attendance_data.date, is_driver, weekday_schedule_start, count_all_ot
+                attendance_data.date, is_driver, weekday_schedule_start, count_all_ot,
+                is_stat_holiday=is_stat_holiday,
             )
             regular_hours = regular
             ot_hours = ot
             weekend_ot_hours = weekend_ot
         
         # Calculate statutory holiday hours if not provided and applicable
-        if (stat_holiday_hours is None or stat_holiday_hours == 0.0) and employment and employment.company_id:
-            holidays = get_holidays_in_range(
-                employment.company_id,
+        if (stat_holiday_hours is None or stat_holiday_hours == 0.0) and is_stat_holiday and employment and employment.company_id:
+            # Calculate stat holiday entitlement based on BC ESA rules
+            stat_holiday_hours = calculate_stat_holiday_entitlement(
+                attendance_data.employee_id,
                 attendance_data.date,
                 attendance_data.date,
-                attendance_data.employee_id
+                attendance_data.date,
+                employment.company_id
             )
-            if attendance_data.date in holidays:
-                # Calculate stat holiday entitlement based on BC ESA rules
-                stat_holiday_hours = calculate_stat_holiday_entitlement(
-                    attendance_data.employee_id,
-                    attendance_data.date,
-                    attendance_data.date,
-                    attendance_data.date,
-                    employment.company_id
-                )
         
         # Parse override fields if provided
         override_check_in = None
@@ -637,6 +643,17 @@ async def list_attendance_records(
             
             # Get all unique employee IDs from records
             employee_ids = set(record.employee_id for record in records)
+
+            # Same hire/termination rule as the attendance report: drop staff
+            # terminated before the period or hired after it.
+            if company_id:
+                eligible_ids = list_employee_ids_for_period(company_id, start_date, end_date)
+            else:
+                eligible_ids = filter_employee_ids_active_in_period(
+                    employee_ids, start_date, end_date
+                )
+            employee_ids = {emp_id for emp_id in employee_ids if emp_id in eligible_ids}
+            records = [record for record in records if record.employee_id in eligible_ids]
             
             # If company_id not provided, try to infer from employee records
             company_ids = set()
@@ -940,6 +957,15 @@ async def list_attendance_records(
                 "data": attendance_data
             }
         
+        # Skip employees terminated before / hired after the period
+        if not start_date or not end_date or not filter_employee_ids_active_in_period(
+            {employee_id}, start_date, end_date
+        ):
+            return {
+                "success": True,
+                "data": []
+            }
+
         # New logic: Generate all dates in pay period for the employee
         # Get company_id from employee's employment if not provided
         if not company_id:
@@ -2289,10 +2315,18 @@ async def recalculate_attendance_hours(
             except (AttributeError, TypeError):
                 schedule_start, schedule_end = (None, None)
         
+        is_stat_holiday = False
+        if employment and employment.company_id:
+            holidays = get_holidays_in_range(
+                employment.company_id, existing.date, existing.date, existing.employee_id
+            )
+            is_stat_holiday = existing.date in holidays
+
         # Recalculate hours based on effective rounded times
         regular, ot, weekend_ot = calculate_hours_worked(
             rounded_check_in, rounded_check_out, schedule_start, schedule_end,
-            existing.date, is_driver, weekday_schedule_start
+            existing.date, is_driver, weekday_schedule_start,
+            is_stat_holiday=is_stat_holiday,
         )
         
         # Update only the calculated fields (not override fields)
@@ -2584,7 +2618,8 @@ async def recalculate_attendance(
                 # Recalculate hours using ROUNDED times
                 regular, ot, weekend_ot = calculate_hours_worked(
                     rounded_check_in, rounded_check_out, schedule_start, schedule_end,
-                    attendance.date, is_driver, weekday_schedule_start, count_all_ot
+                    attendance.date, is_driver, weekday_schedule_start, count_all_ot,
+                    is_stat_holiday=is_stat_holiday,
                 )
                 
                 # Check if it's a statutory holiday and calculate stat holiday hours

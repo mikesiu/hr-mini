@@ -83,5 +83,43 @@ class TestDriverEarlyStartOT(unittest.TestCase):
         self.assertEqual((regular, ot, weekend_ot), (8.0, 0.25, 0.0))
 
 
+class TestStatHolidayWeekendOT(unittest.TestCase):
+    """Worked time on a statutory holiday counts as weekend OT, not regular hours."""
+
+    def test_partial_shift_on_stat_holiday(self):
+        regular, ot, weekend_ot = calculate_hours_worked(
+            time(8, 45),
+            time(11, 0),
+            time(7, 0),
+            time(15, 30),
+            date(2026, 10, 12),  # Thanksgiving Monday
+            is_stat_holiday=True,
+        )
+        self.assertEqual((regular, ot, weekend_ot), (0.0, 0.0, 2.25))
+
+    def test_time_after_schedule_end_is_weekend_ot(self):
+        regular, ot, weekend_ot = calculate_hours_worked(
+            time(8, 0),
+            time(17, 0),
+            time(8, 0),
+            time(16, 0),
+            date(2026, 10, 12),
+            is_stat_holiday=True,
+        )
+        self.assertEqual((regular, ot, weekend_ot), (0.0, 0.0, 9.0))
+
+    def test_early_arrival_uses_schedule_start(self):
+        regular, ot, weekend_ot = calculate_hours_worked(
+            time(6, 0),
+            time(11, 0),
+            time(7, 0),
+            time(15, 30),
+            date(2026, 10, 12),
+            is_driver=True,
+            is_stat_holiday=True,
+        )
+        self.assertEqual((regular, ot, weekend_ot), (0.0, 0.0, 4.0))
+
+
 if __name__ == "__main__":
     unittest.main()

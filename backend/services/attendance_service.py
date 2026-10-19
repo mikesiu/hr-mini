@@ -14,7 +14,8 @@ def calculate_hours_worked(
     work_date: date,
     is_driver: bool = False,
     weekday_schedule_start: Optional[time] = None,
-    count_all_ot: bool = False
+    count_all_ot: bool = False,
+    is_stat_holiday: bool = False,
 ) -> Tuple[float, float, float]:
     """
     Calculate regular hours, OT hours, and weekend OT hours for a given day.
@@ -29,6 +30,7 @@ def calculate_hours_worked(
         weekday_schedule_start: Optional weekday schedule start time (e.g., Monday's start time)
                               Used for weekend OT calculation when schedule_start is None
         count_all_ot: Whether to count OT even if less than 30 minutes
+        is_stat_holiday: Worked time on a statutory holiday counts as weekend OT
         
     Returns:
         Tuple of (regular_hours, ot_hours, weekend_ot_hours)
@@ -50,21 +52,20 @@ def calculate_hours_worked(
     total_seconds = (check_out_dt - check_in_dt).total_seconds()
     total_hours = total_seconds / 3600.0
     
-    # Handle weekend OT first (before checking schedule)
-    # For weekends, calculate OT from the later of: actual check-in or weekday schedule start
-    if is_weekend:
-        # Determine the effective start time for weekend OT calculation
-        # If staff checks in earlier than weekday schedule start, use schedule start
-        # If staff checks in later than (or equal to) weekday schedule start, use actual check-in
-        if weekday_schedule_start:
-            schedule_start_dt = datetime.combine(work_date, weekday_schedule_start)
+    # Weekend and statutory holiday work both count as weekend OT.
+    # Hours run from the later of actual check-in or the schedule start to check-out.
+    if is_weekend or is_stat_holiday:
+        floor_start = weekday_schedule_start
+        if floor_start is None and is_stat_holiday and not is_weekend:
+            floor_start = schedule_start
+        if floor_start:
+            schedule_start_dt = datetime.combine(work_date, floor_start)
             # Use the later of check-in or schedule start
             effective_start_dt = max(check_in_dt, schedule_start_dt)
         else:
-            # No weekday schedule available, use actual check-in time
+            # No schedule start available, use actual check-in time
             effective_start_dt = check_in_dt
         
-        # Weekend OT is calculated from effective start to check-out
         weekend_ot_seconds = (check_out_dt - effective_start_dt).total_seconds()
         weekend_ot_hours = max(0.0, weekend_ot_seconds / 3600.0)
         return (0.0, 0.0, weekend_ot_hours)
