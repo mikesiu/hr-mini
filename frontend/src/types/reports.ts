@@ -21,7 +21,7 @@ export type GroupByField =
   | 'employee' | 'company' | 'department' | 'position' | 'status'
   | 'employment_period'
   | 'pay_type' | 'salary_range'
-  | 'leave_type' | 'leave_status'
+  | 'leave_type' | 'leave_status' | 'leave_category'
   | 'permit_type' | 'expiry_status'
   | 'expense_type' | 'claim_status';
 
@@ -138,6 +138,7 @@ export interface LeaveTakenData {
   employee_name: string;
   leave_type_code: string;
   leave_type_name: string;
+  leave_category?: string;
   start_date: string;
   end_date: string;
   days_taken: number;

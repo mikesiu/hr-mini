@@ -66,6 +66,8 @@ class GroupByField(str, Enum):
     # Leave specific
     LEAVE_TYPE = "leave_type"
     LEAVE_STATUS = "leave_status"
+    # Vacation, Sick, No Pay (unpaid + unpaid sick), Others
+    LEAVE_CATEGORY = "leave_category"
     
     # Work permit specific
     PERMIT_TYPE = "permit_type"
@@ -239,6 +241,7 @@ class LeaveTakenData(BaseModel):
     employee_name: str
     leave_type_code: str
     leave_type_name: str
+    leave_category: str = "Others"
     start_date: date
     end_date: date
     days_taken: float

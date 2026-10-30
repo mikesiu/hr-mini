@@ -24,6 +24,7 @@ import {
   Person as PersonIcon,
 } from '@mui/icons-material';
 import { ReportSummary, GroupedReportData, ReportFilters as FilterValues } from '../../types/reports';
+import { formatLeaveDays, leaveGroupHeading } from '../../utils/leaveReportFormat';
 import { useCompanyFilter } from '../../contexts/CompanyFilterContext';
 import { FILTER_CONFIGS } from '../../utils/filterValidation';
 
@@ -147,7 +148,10 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps -- formatFilterValue uses companies
   }, [appliedFilters, summary.filters_applied, companies]);
 
-  const flatRows = isGrouped ? [] : (data as any[]);
+  const flatRows = useMemo(
+    () => (isGrouped ? [] : (data as any[])),
+    [isGrouped, data]
+  );
   const totalRecordCount = summary.total_records ?? (isGrouped
     ? (data as GroupedReportData[]).reduce((sum, g) => sum + (g.group_count || g.records?.length || 0), 0)
     : flatRows.length);
@@ -789,6 +793,23 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
     }
   };
 
+  const renderLeaveSubtotalRow = (totalDays: number | undefined) => {
+    if (reportType !== 'leave_taken' || totalDays === undefined || totalDays === null) return null;
+    const headers = getTableHeaders();
+    const daysIndex = headers.indexOf('Days');
+    if (daysIndex < 0) return null;
+    const trailing = headers.length - daysIndex - 1;
+    return (
+      <TableRow sx={{ backgroundColor: '#f5f5f5' }}>
+        <TableCell colSpan={daysIndex} align="right" sx={{ fontWeight: 'bold' }}>
+          Subtotal
+        </TableCell>
+        <TableCell sx={{ fontWeight: 'bold' }}>{formatLeaveDays(totalDays)}</TableCell>
+        {trailing > 0 && <TableCell colSpan={trailing} />}
+      </TableRow>
+    );
+  };
+
   const renderGroupedData = () => {
     if (!isGrouped || !Array.isArray(data)) return null;
     
@@ -801,9 +822,11 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
             <Paper sx={{ p: 2, mb: 2, bgcolor: 'primary.light', color: 'primary.contrastText' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="h6">
-                  {group.group_value} ({group.group_count} records)
+                  {reportType === 'leave_taken'
+                    ? leaveGroupHeading(group)
+                    : `${group.group_value} (${group.group_count} records)`}
                 </Typography>
-                {group.group_summary && (
+                {reportType !== 'leave_taken' && group.group_summary && (
                   <Box sx={{ display: 'flex', gap: 2 }}>
                     {Object.entries(group.group_summary).map(([key, value]) => (
                       <Chip
@@ -840,6 +863,7 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
                         ))}
                       </TableRow>
                     ))}
+                    {renderLeaveSubtotalRow(group.group_summary?.total_days)}
                   </TableBody>
                 </Table>
               </TableContainer>
@@ -851,7 +875,9 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
                 {group.subgroups.map((subgroup, subIndex) => (
                   <Box key={subIndex} sx={{ mb: 2 }}>
                     <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold' }}>
-                      {subgroup.group_value} ({subgroup.group_count} records)
+                      {reportType === 'leave_taken'
+                        ? leaveGroupHeading(subgroup)
+                        : `${subgroup.group_value} (${subgroup.group_count} records)`}
                     </Typography>
                     {subgroup.records && subgroup.records.length > 0 && (
                       <TableContainer component={Paper} sx={{ ml: 2 }}>
@@ -873,6 +899,7 @@ export const ReportPreview: React.FC<ReportPreviewProps> = ({
                                 ))}
                               </TableRow>
                             ))}
+                            {renderLeaveSubtotalRow(subgroup.group_summary?.total_days)}
                           </TableBody>
                         </Table>
                       </TableContainer>

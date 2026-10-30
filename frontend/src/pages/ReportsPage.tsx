@@ -21,6 +21,7 @@ import {
 } from '../types/reports';
 import { FILTER_CONFIGS } from '../utils/filterValidation';
 import { downloadVacationLedgerPdfsByEmployee } from '../utils/vacationLedgerPdf';
+import { formatLeaveDays, leaveGroupHeading } from '../utils/leaveReportFormat';
 // Dynamic import for ExcelJS
 
 // Helper function to format dates correctly without timezone issues
@@ -374,21 +375,19 @@ export default function ReportsPage() {
       html += `
         <div style="margin-top: 20px; margin-bottom: 10px;">
           <h3 style="background-color: #f0f0f0; padding: 10px; margin: 0; border-left: 4px solid #1976d2;">
-            ${group.group_value} (${group.group_count} records)
+            ${selectedReportType === 'leave_taken' ? leaveGroupHeading(group) : `${group.group_value} (${group.group_count} records)`}
           </h3>
         </div>
       `;
       
-      // Group table
+      // Group table. Skipped when rows live in subgroups (for example employee, then leave category).
+      if (group.records && group.records.length > 0) {
       html += '<table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">';
       html += '<thead><tr>';
       headers.forEach(header => {
         html += `<th style="border: 1px solid #000; padding: 8px; background-color: #f0f0f0; font-weight: bold;">${header}</th>`;
       });
       html += '</tr></thead><tbody>';
-      
-      // Group records
-      if (group.records && group.records.length > 0) {
         group.records.forEach((record: any) => {
           html += '<tr>';
           
@@ -493,9 +492,15 @@ export default function ReportsPage() {
           
           html += '</tr>';
         });
-      }
-      
+        if (selectedReportType === 'leave_taken' && group.group_summary?.total_days != null) {
+          html += `<tr style="background-color: #f5f5f5; font-weight: bold;">
+            <td colspan="4" style="border: 1px solid #000; padding: 8px; text-align: right;">Subtotal</td>
+            <td style="border: 1px solid #000; padding: 8px;">${formatLeaveDays(group.group_summary.total_days)}</td>
+            <td colspan="2" style="border: 1px solid #000; padding: 8px;"></td>
+          </tr>`;
+        }
       html += '</tbody></table>';
+      }
       
       // Handle subgroups if they exist
       if (group.subgroups && group.subgroups.length > 0) {
@@ -503,7 +508,7 @@ export default function ReportsPage() {
           html += `
             <div style="margin-left: 20px; margin-top: 10px;">
               <h4 style="background-color: #f5f5f5; padding: 8px; margin: 0; border-left: 2px solid #666;">
-                ${subgroup.group_value} (${subgroup.group_count} records)
+                ${selectedReportType === 'leave_taken' ? leaveGroupHeading(subgroup) : `${subgroup.group_value} (${subgroup.group_count} records)`}
               </h4>
             </div>
           `;
@@ -568,6 +573,13 @@ export default function ReportsPage() {
               }
               html += '</tr>';
             });
+            if (selectedReportType === 'leave_taken' && subgroup.group_summary?.total_days != null) {
+              html += `<tr style="background-color: #f5f5f5; font-weight: bold;">
+                <td colspan="4" style="border: 1px solid #000; padding: 6px; text-align: right; font-size: 12px;">Subtotal</td>
+                <td style="border: 1px solid #000; padding: 6px; font-size: 12px;">${formatLeaveDays(subgroup.group_summary.total_days)}</td>
+                <td colspan="2" style="border: 1px solid #000; padding: 6px;"></td>
+              </tr>`;
+            }
           }
           
           html += '</tbody></table>';
@@ -883,26 +895,50 @@ export default function ReportsPage() {
           const isGrouped = reportSummary?.group_by_applied && reportSummary.group_by_applied.length > 0;
           let currentRow = 1;
 
+          const appendLeaveSubtotalRow = (sheet: any, rowNumber: number, headers: string[], group: any) => {
+            if (selectedReportType !== 'leave_taken' || group?.group_summary?.total_days == null) {
+              return rowNumber;
+            }
+            const daysIndex = headers.indexOf('Days');
+            headers.forEach((_, index) => {
+              const cell = sheet.getCell(rowNumber, index + 1);
+              cell.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: 'FFF5F5F5' },
+              };
+              cell.font = { bold: true };
+            });
+            sheet.getCell(rowNumber, 1).value = 'Subtotal';
+            if (daysIndex >= 0) {
+              sheet.getCell(rowNumber, daysIndex + 1).value = Number(formatLeaveDays(group.group_summary.total_days));
+            }
+            return rowNumber + 1;
+          };
+
           if (isGrouped) {
             reportData.forEach((group: any) => {
-              worksheet.getCell(`A${currentRow}`).value = `${group.group_value} (${group.group_count} records)`;
+              worksheet.getCell(`A${currentRow}`).value = selectedReportType === 'leave_taken'
+                ? leaveGroupHeading(group)
+                : `${group.group_value} (${group.group_count} records)`;
               worksheet.getCell(`A${currentRow}`).font = { bold: true };
               currentRow++;
 
               const headers = getTableHeaders();
-              headers.forEach((header, index) => {
-                const cell = worksheet.getCell(currentRow, index + 1);
-                cell.value = header;
-                cell.font = { bold: true };
-                cell.fill = {
-                  type: 'pattern',
-                  pattern: 'solid',
-                  fgColor: { argb: 'FFE0E0E0' },
-                };
-              });
-              currentRow++;
 
               if (group.records && group.records.length > 0) {
+                headers.forEach((header, index) => {
+                  const cell = worksheet.getCell(currentRow, index + 1);
+                  cell.value = header;
+                  cell.font = { bold: true };
+                  cell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFE0E0E0' },
+                  };
+                });
+                currentRow++;
+
                 group.records.forEach((record: any) => {
                   const row = getTableCells(record);
                   row.forEach((cellValue, index) => {
@@ -910,15 +946,31 @@ export default function ReportsPage() {
                   });
                   currentRow++;
                 });
+                currentRow = appendLeaveSubtotalRow(worksheet, currentRow, headers, group);
               }
 
               if (group.subgroups && group.subgroups.length > 0) {
                 group.subgroups.forEach((subgroup: any) => {
-                  worksheet.getCell(`A${currentRow}`).value = `  ${subgroup.group_value} (${subgroup.group_count} records)`;
+                  worksheet.getCell(`A${currentRow}`).value = selectedReportType === 'leave_taken'
+                    ? `  ${leaveGroupHeading(subgroup)}`
+                    : `  ${subgroup.group_value} (${subgroup.group_count} records)`;
                   worksheet.getCell(`A${currentRow}`).font = { bold: true, italic: true };
                   currentRow++;
 
                   if (subgroup.records && subgroup.records.length > 0) {
+                    if (selectedReportType === 'leave_taken') {
+                      headers.forEach((header, index) => {
+                        const cell = worksheet.getCell(currentRow, index + 1);
+                        cell.value = header;
+                        cell.font = { bold: true };
+                        cell.fill = {
+                          type: 'pattern',
+                          pattern: 'solid',
+                          fgColor: { argb: 'FFE0E0E0' },
+                        };
+                      });
+                      currentRow++;
+                    }
                     subgroup.records.forEach((record: any) => {
                       const row = getTableCells(record);
                       row.forEach((cellValue, index) => {
@@ -926,6 +978,7 @@ export default function ReportsPage() {
                       });
                       currentRow++;
                     });
+                    currentRow = appendLeaveSubtotalRow(worksheet, currentRow, headers, subgroup);
                   }
                 });
               }

@@ -202,7 +202,7 @@ def _validate_filter_value(filter_name: str, filter_value: Any) -> Optional[str]
         # Validate group field
         valid_group_fields = [
             'employee', 'company', 'department', 'position', 'status', 'employment_period',
-            'pay_type', 'salary_range', 'leave_type', 'leave_status', 'permit_type',
+            'pay_type', 'salary_range', 'leave_type', 'leave_status', 'leave_category', 'permit_type',
             'expiry_status', 'expense_type', 'claim_status'
         ]
         if filter_value and filter_value not in valid_group_fields:

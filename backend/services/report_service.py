@@ -17,6 +17,7 @@ from repos.company_repo import get_all_companies
 from repos.salary_history_repo import search_salary_records
 from repos.work_permit_repo import search_work_permits
 
+from utils.leave_categories import LEAVE_CATEGORY_ORDER, classify_leave_category
 from schemas_reports import (
     ReportFilterBase, EmployeeReportFilters, LeaveReportFilters, 
     SalaryReportFilters, ExpenseReportFilters, WorkPermitReportFilters,
@@ -143,6 +144,7 @@ class ReportService:
             GroupByField.PAY_TYPE: "pay_type",
             GroupByField.LEAVE_TYPE: "leave_type_name",  # Use leave_type_name for grouping by leave type
             GroupByField.LEAVE_STATUS: "status",
+            GroupByField.LEAVE_CATEGORY: "leave_category",
             GroupByField.PERMIT_TYPE: "permit_type",
             GroupByField.EXPIRY_STATUS: "is_expired",
             GroupByField.EXPENSE_TYPE: "expense_type",
@@ -205,8 +207,16 @@ class ReportService:
                 group_summary=group_summary
             ))
         
-        # Sort groups by group value (alphabetically by default)
-        grouped_data.sort(key=lambda x: str(x.group_value).lower())
+        # Leave categories keep a fixed order. Other groups stay alphabetical.
+        def _group_sort_key(item: GroupedReportData):
+            if item.group_key == GroupByField.LEAVE_CATEGORY.value:
+                try:
+                    return (0, LEAVE_CATEGORY_ORDER.index(item.group_value))
+                except ValueError:
+                    return (0, len(LEAVE_CATEGORY_ORDER))
+            return (1, str(item.group_value).lower())
+
+        grouped_data.sort(key=_group_sort_key)
         return grouped_data
     
     def _calculate_group_summary(self, records: List[Dict[str, Any]], group_by: GroupByField) -> Dict[str, Any]:
@@ -224,6 +234,7 @@ class ReportService:
             GroupByField.PAY_TYPE: "pay_type",
             GroupByField.LEAVE_TYPE: "leave_type_name",  # Use leave_type_name for grouping by leave type
             GroupByField.LEAVE_STATUS: "status",
+            GroupByField.LEAVE_CATEGORY: "leave_category",
             GroupByField.PERMIT_TYPE: "permit_type",
             GroupByField.EXPIRY_STATUS: "is_expired",
             GroupByField.EXPENSE_TYPE: "expense_type",
@@ -262,6 +273,15 @@ class ReportService:
             summary["total_employees"] = len(records)
             pay_rates = [get_field_value(r, "pay_rate", 0) for r in records if isinstance(get_field_value(r, "pay_rate"), (int, float))]
             summary["avg_pay_rate"] = sum(pay_rates) / len(records) if records else 0
+
+        days = [
+            float(get_field_value(r, "days_taken"))
+            for r in records
+            if isinstance(get_field_value(r, "days_taken"), (int, float))
+            and not isinstance(get_field_value(r, "days_taken"), bool)
+        ]
+        if days:
+            summary["total_days"] = round(sum(days), 2)
         
         return summary
     
@@ -737,6 +757,7 @@ class ReportService:
                                 employee_name=employee.full_name,
                                 leave_type_code=leave_type.code,
                                 leave_type_name=leave_type.name,
+                                leave_category=classify_leave_category(leave_type.code, leave_type.name),
                                 start_date=leave.start_date,
                                 end_date=leave.end_date,
                                 days_taken=leave.days,
@@ -762,9 +783,19 @@ class ReportService:
                 sort_direction = filters.sort_direction if filters.sort_direction is not None else SortDirection.ASC
                 data_dicts = self._sort_data(data_dicts, filters.sort_by, sort_direction)
             
+            # Employee grouping on this report also splits each person into
+            # Vacation, Sick, No Pay, and Others unless another secondary group is set.
+            group_by = filters.group_by
+            group_by_secondary = filters.group_by_secondary
+            if group_by == GroupByField.EMPLOYEE and group_by_secondary is None:
+                group_by_secondary = GroupByField.LEAVE_CATEGORY
+
             # Apply grouping if specified
-            if filters.group_by:
-                grouped_data = self._group_data(data_dicts, filters.group_by, filters.group_by_secondary)
+            if group_by:
+                grouped_data = self._group_data(data_dicts, group_by, group_by_secondary)
+                applied = [group_by.value]
+                if group_by_secondary:
+                    applied.append(group_by_secondary.value)
                 return grouped_data, ReportSummary(
                     total_records=len(report_data),
                     total_pages=1,
@@ -772,7 +803,7 @@ class ReportService:
                     generated_at=datetime.now(),
                     filters_applied=filters.dict(exclude_none=True),
                     sort_applied={"field": filters.sort_by.value, "direction": sort_direction.value} if filters.sort_by else None,
-                    group_by_applied=[filters.group_by.value] + ([filters.group_by_secondary.value] if filters.group_by_secondary else []) if filters.group_by else []
+                    group_by_applied=applied
                 )
             
             # Convert back to LeaveTakenData objects

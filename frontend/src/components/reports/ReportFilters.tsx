@@ -666,6 +666,11 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
               </FormControl>
             </Grid>
           </Grid>
+          {reportType === 'leave_taken' && (
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
+              Leave Category groups rows into Vacation, Sick, No Pay (unpaid leave and unpaid sick), and Others, with a day subtotal on each group. Grouping by employee adds those categories under each person.
+            </Typography>
+          )}
         </AccordionDetails>
       </Accordion>
 

@@ -72,6 +72,7 @@ export const GROUP_FIELD_APPLICABILITY = {
   // Leave specific
   leave_type: ['leave_taken'],
   leave_status: ['leave_taken'],
+  leave_category: ['leave_taken'],
   
   // Work permit specific
   permit_type: ['work_permit_status'],
@@ -212,6 +213,7 @@ export function getFieldDisplayName(field: string): string {
     employment_period: 'Employment Period',
     salary_range: 'Salary Range',
     leave_status: 'Leave Status',
+    leave_category: 'Leave Category',
     expiry_status: 'Expiry Status',
     claim_status: 'Claim Status',
   };
@@ -237,6 +239,7 @@ export function getFieldDescription(field: string): string {
     pay_rate: 'Sort by salary amount',
     effective_date: 'Sort by salary effective date',
     leave_type: 'Sort by leave type',
+    leave_category: 'Group into Vacation, Sick, No Pay (unpaid leave and unpaid sick), and Others',
     days_taken: 'Sort by number of days taken',
     permit_type: 'Sort by work permit type',
     expiry_date: 'Sort by permit expiry date',
