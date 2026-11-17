@@ -104,6 +104,12 @@ app.include_router(attendance.router, prefix="/api/attendance", tags=["Attendanc
 app.include_router(codes.router, prefix="/api/codes", tags=["Code Values"])
 print("All routes registered successfully!")
 
+try:
+    from repos.work_permit_repo import ensure_work_permit_schema
+    ensure_work_permit_schema()
+except Exception as e:
+    print(f"Work permit schema check failed: {e}")
+
 # Serve the React production build when present (single-server / desktop mode).
 from app_paths import frontend_build_dir
 

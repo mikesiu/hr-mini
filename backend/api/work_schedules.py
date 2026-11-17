@@ -268,6 +268,7 @@ async def get_schedule_assignments(
                 "id": assignment.id,
                 "employee_id": assignment.employee_id,
                 "employee_name": employee_name,
+                "employee_status": employee.status if employee else None,
                 "schedule_id": assignment.schedule_id,
                 "effective_date": assignment.effective_date.isoformat() if assignment.effective_date else None,
                 "end_date": assignment.end_date.isoformat() if assignment.end_date else None,

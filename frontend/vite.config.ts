@@ -1,0 +1,28 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [react(), tailwindcss()],
+  resolve: {
+    tsconfigPaths: true, // honor tsconfig "paths" natively
+    alias: {
+      '@': path.resolve(path.dirname(fileURLToPath(import.meta.url)), './src'),
+    },
+  },
+  server: {
+    // Keep the CRA dev port: scripts/start_dev.bat and api/client.ts rely on 3000.
+    port: 3000,
+    host: true, // listen on 0.0.0.0 so LAN access keeps working
+  },
+  build: {
+    // The FastAPI backend, hr_mini.spec and start scripts serve frontend/build.
+    outDir: 'build',
+    emptyOutDir: true,
+    // Main bundle (~1.8 MB, MUI + exceljs + jspdf) is served locally by FastAPI; not code-split yet.
+    chunkSizeWarningLimit: 2000,
+  },
+});

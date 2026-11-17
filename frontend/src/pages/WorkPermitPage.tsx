@@ -55,6 +55,8 @@ interface WorkPermit {
   employee_id: string;
   permit_type: string;
   expiry_date: string;
+  status?: string;
+  renewed_date?: string | null;
   employee?: {
     id: string;
     first_name: string;
@@ -96,6 +98,14 @@ function TabPanel(props: TabPanelProps) {
 }
 
 // Helper function to format date string (YYYY-MM-DD) without timezone issues
+function todayString(): string {
+  const today = new Date();
+  const year = today.getFullYear();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function formatDateString(dateStr: string): string {
   if (!dateStr) return '';
   // Parse YYYY-MM-DD format directly to avoid timezone conversion
@@ -141,6 +151,7 @@ const WorkPermitPage: React.FC = () => {
   const [formData, setFormData] = useState({
     permit_type: '',
     expiry_date: '',
+    renewed_date: '',
   });
 
   // Dialog state
@@ -252,9 +263,13 @@ const WorkPermitPage: React.FC = () => {
     ? workPermits.filter(permit => permit.employee_id === selectedEmployee)
     : [];
 
-  // Get current work permit (most recent)
-  const currentPermit = employeePermits.length > 0 
-    ? employeePermits.sort((a, b) => new Date(b.expiry_date).getTime() - new Date(a.expiry_date).getTime())[0]
+  const isRenewedPermit = (permit: WorkPermit) =>
+    permit.status === 'renewed' || Boolean(permit.renewed_date);
+
+  // Current permit is the open one. A renewal closes the previous record.
+  const activePermits = employeePermits.filter((permit) => !isRenewedPermit(permit));
+  const currentPermit = activePermits.length > 0
+    ? [...activePermits].sort((a, b) => b.id - a.id)[0]
     : null;
 
   // Calculate days until expiry
@@ -285,8 +300,19 @@ const WorkPermitPage: React.FC = () => {
   };
 
   // Get status chip for permit
-  const getStatusChip = (expiryDate: string) => {
-    const days = getDaysUntilExpiry(expiryDate);
+  const getStatusChip = (permit: WorkPermit) => {
+    if (isRenewedPermit(permit)) {
+      const when = permit.renewed_date ? formatDateString(permit.renewed_date) : '';
+      return (
+        <Chip
+          label={when ? `Closed · Renewed ${when}` : 'Closed · Renewed'}
+          size="small"
+          variant="outlined"
+        />
+      );
+    }
+
+    const days = getDaysUntilExpiry(permit.expiry_date);
     
     if (days < 0) {
       return <Chip icon={<ErrorIcon />} label={`EXPIRED (${Math.abs(days)} days ago)`} color="error" size="small" />;
@@ -311,28 +337,56 @@ const WorkPermitPage: React.FC = () => {
       setError('Please select a valid expiry date');
       return;
     }
+    const closingPrevious = !editingPermit && Boolean(currentPermit);
+    const editingRenewed = Boolean(editingPermit && isRenewedPermit(editingPermit));
+    if ((closingPrevious || editingRenewed) && !/^\d{4}-\d{2}-\d{2}$/.test(formData.renewed_date)) {
+      setError('Please select the date the previous permit was renewed');
+      return;
+    }
 
     try {
       setLoading(true);
       setError(null);
 
-      const permitData = {
-        employee_id: selectedEmployee,
-        permit_type: formData.permit_type,
-        expiry_date: formData.expiry_date,
-      };
-
       if (editingPermit) {
-        await workPermitAPI.update(editingPermit.id, permitData);
+        const updateData: {
+          permit_type: string;
+          expiry_date: string;
+          renewed_date?: string;
+        } = {
+          permit_type: formData.permit_type,
+          expiry_date: formData.expiry_date,
+        };
+        if (editingRenewed) {
+          updateData.renewed_date = formData.renewed_date;
+        }
+        await workPermitAPI.update(editingPermit.id, updateData);
         setSuccessMessage('Work permit updated successfully!');
       } else {
+        const permitData: {
+          employee_id: string;
+          permit_type: string;
+          expiry_date: string;
+          renewed_date?: string;
+        } = {
+          employee_id: selectedEmployee,
+          permit_type: formData.permit_type,
+          expiry_date: formData.expiry_date,
+        };
+        if (closingPrevious) {
+          permitData.renewed_date = formData.renewed_date;
+        }
         await workPermitAPI.create(permitData);
-        setSuccessMessage('Work permit added successfully!');
+        setSuccessMessage(
+          closingPrevious
+            ? 'Work permit renewed. The previous permit is closed.'
+            : 'Work permit added successfully!'
+        );
       }
 
       setPermitDialogOpen(false);
       setEditingPermit(null);
-      setFormData({ permit_type: '', expiry_date: '' });
+      setFormData({ permit_type: '', expiry_date: '', renewed_date: '' });
       loadWorkPermits();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to save work permit');
@@ -367,9 +421,12 @@ const WorkPermitPage: React.FC = () => {
     // Keep as YYYY-MM-DD string — do not convert through Date while editing
     const raw = permit.expiry_date || '';
     const dateStr = raw.includes('T') ? raw.split('T')[0] : raw.slice(0, 10);
+    const renewedRaw = permit.renewed_date || '';
+    const renewedStr = renewedRaw.includes('T') ? renewedRaw.split('T')[0] : renewedRaw.slice(0, 10);
     setFormData({
       permit_type: permit.permit_type,
       expiry_date: /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : '',
+      renewed_date: /^\d{4}-\d{2}-\d{2}$/.test(renewedStr) ? renewedStr : '',
     });
     setPermitDialogOpen(true);
   };
@@ -385,6 +442,7 @@ const WorkPermitPage: React.FC = () => {
     setFormData({
       permit_type: '',
       expiry_date: `${year}-${month}-${day}`,
+      renewed_date: todayString(),
     });
     setPermitDialogOpen(true);
   };
@@ -415,7 +473,7 @@ const WorkPermitPage: React.FC = () => {
             onClick={handleAddNew}
             disabled={!selectedEmployee}
           >
-            Add Work Permit
+            {currentPermit ? 'Renew Work Permit' : 'Add Work Permit'}
           </Button>
         </Box>
 
@@ -637,7 +695,7 @@ const WorkPermitPage: React.FC = () => {
                       </Grid>
                       <Grid item xs={12} md={6}>
                         <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                          {getStatusChip(currentPermit.expiry_date)}
+                          {getStatusChip(currentPermit)}
                         </Box>
                       </Grid>
                     </Grid>
@@ -677,10 +735,14 @@ const WorkPermitPage: React.FC = () => {
                       <ListItem>
                         <ListItemText
                           primary={permit.permit_type}
-                          secondary={`Expires: ${formatDateString(permit.expiry_date)}`}
+                          secondary={
+                            isRenewedPermit(permit)
+                              ? `Renewed: ${formatDateString(permit.renewed_date || '')} · Expires: ${formatDateString(permit.expiry_date)}`
+                              : `Expires: ${formatDateString(permit.expiry_date)}`
+                          }
                         />
                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          {getStatusChip(permit.expiry_date)}
+                          {getStatusChip(permit)}
                           <IconButton
                             onClick={() => handleEdit(permit)}
                             size="small"
@@ -745,7 +807,7 @@ const WorkPermitPage: React.FC = () => {
         {/* Add/Edit Work Permit Dialog */}
         <Dialog open={permitDialogOpen} onClose={() => setPermitDialogOpen(false)} maxWidth="sm" fullWidth>
           <DialogTitle>
-            {editingPermit ? 'Edit Work Permit' : 'Add Work Permit'}
+            {editingPermit ? 'Edit Work Permit' : currentPermit ? 'Renew Work Permit' : 'Add Work Permit'}
           </DialogTitle>
           <DialogContent>
             <Box sx={{ pt: 1 }}>
@@ -776,7 +838,33 @@ const WorkPermitPage: React.FC = () => {
                 InputLabelProps={{ shrink: true }}
                 inputProps={{ min: '1900-01-01', max: '2200-12-31' }}
                 fullWidth
+                sx={{ mb: 2 }}
               />
+
+              {!editingPermit && currentPermit && (
+                <TextField
+                  label="Date previous permit renewed"
+                  type="date"
+                  value={formData.renewed_date}
+                  onChange={(e) => setFormData({ ...formData, renewed_date: e.target.value })}
+                  helperText={`Closes the current ${currentPermit.permit_type} (expires ${formatDateString(currentPermit.expiry_date)}).`}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{ min: '1900-01-01', max: '2200-12-31' }}
+                  fullWidth
+                />
+              )}
+
+              {editingPermit && isRenewedPermit(editingPermit) && (
+                <TextField
+                  label="Date renewed"
+                  type="date"
+                  value={formData.renewed_date}
+                  onChange={(e) => setFormData({ ...formData, renewed_date: e.target.value })}
+                  InputLabelProps={{ shrink: true }}
+                  inputProps={{ min: '1900-01-01', max: '2200-12-31' }}
+                  fullWidth
+                />
+              )}
             </Box>
           </DialogContent>
           <DialogActions>
@@ -786,7 +874,7 @@ const WorkPermitPage: React.FC = () => {
               variant="contained"
               disabled={!formData.permit_type || loading}
             >
-              {editingPermit ? 'Update' : 'Add'} Work Permit
+              {editingPermit ? 'Update' : currentPermit ? 'Renew' : 'Add'} Work Permit
             </Button>
           </DialogActions>
         </Dialog>

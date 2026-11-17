@@ -1,24 +1,24 @@
 import axios from 'axios';
 
 // Dynamically determine API URL based on how the frontend is accessed
-// - CRA dev server (port 3000): call the FastAPI port directly
+// - Vite dev server: call the FastAPI port directly
 // - Production / desktop (.exe) single-server mode: same-origin /api
 const getApiBaseUrl = () => {
   // Full URL override (e.g. http://localhost:8888/api or /api)
-  if (process.env.REACT_APP_API_URL) {
-    return process.env.REACT_APP_API_URL;
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
   }
 
-  const isCreateReactAppDev =
-    process.env.NODE_ENV === 'development' && window.location.port === '3000';
+  // import.meta.env.DEV is only true under `vite` (never in the built bundle).
+  const isViteDev = import.meta.env.DEV;
 
   // Packaged app and `npm run build` served by FastAPI share one origin.
-  if (!isCreateReactAppDev) {
+  if (!isViteDev) {
     return '/api';
   }
 
   // Keep default aligned with backend/start-backend.bat
-  const port = process.env.REACT_APP_API_PORT || '8888';
+  const port = import.meta.env.VITE_API_PORT || '8888';
 
   // If accessing via IP address (not localhost), use that same IP for API
   const hostname = window.location.hostname;

@@ -269,7 +269,7 @@ const UserPage: React.FC = () => {
     console.log('=== ROLE UPDATE DEBUG ===');
     console.log('1. Editing Role ID:', editingRole.id);
     console.log('2. Role Data to Update:', roleData);
-    console.log('3. Current API Base URL:', process.env.REACT_APP_API_URL || 'http://localhost:8004/api');
+    console.log('3. Current API Base URL:', import.meta.env.VITE_API_URL || 'http://localhost:8004/api');
     
     try {
       console.log('4. Calling userAPI.updateRole...');

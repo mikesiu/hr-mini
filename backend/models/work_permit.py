@@ -10,6 +10,9 @@ class WorkPermit(Base):
     employee_id = Column(String(50), ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
     permit_type = Column(String(100), nullable=False)  # e.g., "Open Work Permit", "Closed Work Permit", "Student Work Permit"
     expiry_date = Column(Date, nullable=False)
+    # active = current permit; renewed = replaced by a later permit
+    status = Column(String(20), nullable=False, default="active", server_default="active")
+    renewed_date = Column(Date, nullable=True)
 
     # noload: avoid DetachedInstanceError after session closes unless joinedload() is used
     employee = relationship("models.employee.Employee", lazy="noload")

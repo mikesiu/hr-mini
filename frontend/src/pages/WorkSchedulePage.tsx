@@ -66,12 +66,14 @@ const WorkSchedulePage: React.FC = () => {
     id: number;
     employee_id: string;
     employee_name?: string;
+    employee_status?: string;
     schedule_id: number;
     effective_date: string;
     end_date?: string;
   }
   
   const [assignmentsDialogOpen, setAssignmentsDialogOpen] = useState(false);
+  const [assignmentFilter, setAssignmentFilter] = useState<'active' | 'all'>('active');
   const [viewingSchedule, setViewingSchedule] = useState<WorkSchedule | null>(null);
   const [scheduleAssignments, setScheduleAssignments] = useState<EmployeeAssignment[]>([]);
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
@@ -324,6 +326,14 @@ const WorkSchedulePage: React.FC = () => {
     }
   };
 
+  const isActiveAssignment = (assignment: EmployeeAssignment) => {
+    if ((assignment.employee_status || '').toLowerCase() === 'terminated') return false;
+    if (!assignment.end_date) return true;
+    const today = new Date();
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    return assignment.end_date.slice(0, 10) >= todayKey;
+  };
+
   const formatTime = (timeStr?: string) => {
     if (!timeStr) return '-';
     return timeStr.substring(0, 5); // HH:MM
@@ -493,15 +503,35 @@ const WorkSchedulePage: React.FC = () => {
           Employee Assignments: {viewingSchedule?.name || ''}
         </DialogTitle>
         <DialogContent>
+          <FormControl size="small" sx={{ mt: 1, mb: 2, minWidth: 220 }}>
+            <InputLabel>Show</InputLabel>
+            <Select
+              label="Show"
+              value={assignmentFilter}
+              onChange={(e) => setAssignmentFilter(e.target.value as 'active' | 'all')}
+            >
+              <MenuItem value="active">Active (exclude terminated)</MenuItem>
+              <MenuItem value="all">All assignments</MenuItem>
+            </Select>
+          </FormControl>
           {assignmentsLoading ? (
             <Box display="flex" justifyContent="center" p={3}>
               <CircularProgress />
             </Box>
-          ) : scheduleAssignments.length === 0 ? (
-            <Alert severity="info" sx={{ mt: 2 }}>
-              No employees assigned to this schedule.
-            </Alert>
-          ) : (
+          ) : (() => {
+            const visibleAssignments = assignmentFilter === 'all'
+              ? scheduleAssignments
+              : scheduleAssignments.filter(isActiveAssignment);
+            if (visibleAssignments.length === 0) {
+              return (
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  {scheduleAssignments.length === 0
+                    ? 'No employees assigned to this schedule.'
+                    : 'No active assignments. Switch to All assignments to see ended or terminated staff.'}
+                </Alert>
+              );
+            }
+            return (
             <TableContainer>
               <Table>
                 <TableHead>
@@ -515,7 +545,7 @@ const WorkSchedulePage: React.FC = () => {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {scheduleAssignments.map((assignment) => (
+                  {visibleAssignments.map((assignment) => (
                     <TableRow key={assignment.id}>
                       <TableCell>{assignment.employee_name || assignment.employee_id}</TableCell>
                       <TableCell>{assignment.employee_id}</TableCell>
@@ -542,7 +572,8 @@ const WorkSchedulePage: React.FC = () => {
                 </TableBody>
               </Table>
             </TableContainer>
-          )}
+            );
+          })()}
         </DialogContent>
         <DialogActions>
           <Button onClick={handleCloseAssignmentsDialog}>Close</Button>

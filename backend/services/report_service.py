@@ -993,6 +993,10 @@ class ReportService:
             today = date.today()
             
             for permit in permit_data:
+                # History rows stay on the work permit page; the status report is the current permit only.
+                if getattr(permit, "status", "active") == "renewed":
+                    continue
+
                 # Get employee information
                 employee = get_employee(permit.employee_id)
                 if not employee:

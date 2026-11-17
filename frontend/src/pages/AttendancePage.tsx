@@ -996,22 +996,32 @@ const AttendancePage: React.FC = () => {
   const handleOpenDialog = (att?: Attendance) => {
     if (att) {
       setEditingAttendance(att);
-      // Calculate effective regular hours for display
-      const effectiveRegular = (att.override_regular_hours !== null && att.override_regular_hours !== undefined) 
-        ? att.override_regular_hours 
-        : (att.regular_hours ?? 0.0);
-      
+      const toTimeInput = (t?: string | null) => (t ? String(t).slice(0, 5) : '');
+
       setFormData({
         employee_id: att.employee_id,
         date: att.date,
         check_in: att.check_in || '',
         check_out: att.check_out || '',
-        edited_check_in: att.override_check_in || '',
-        edited_check_out: att.override_check_out || '',
-        edited_regular_hours: att.override_regular_hours?.toString() || (effectiveRegular > 0 ? effectiveRegular.toString() : ''),
-        edited_ot_hours: att.override_ot_hours?.toString() || '',
-        edited_weekend_ot_hours: att.override_weekend_ot_hours?.toString() || '',
-        edited_stat_holiday_hours: att.override_stat_holiday_hours?.toString() || (att.stat_holiday_hours ? att.stat_holiday_hours.toString() : ''),
+        edited_check_in: toTimeInput(att.override_check_in),
+        edited_check_out: toTimeInput(att.override_check_out),
+        // Only prefill true overrides — leave empty so Save recalculates from times
+        edited_regular_hours:
+          att.override_regular_hours !== null && att.override_regular_hours !== undefined
+            ? String(att.override_regular_hours)
+            : '',
+        edited_ot_hours:
+          att.override_ot_hours !== null && att.override_ot_hours !== undefined
+            ? String(att.override_ot_hours)
+            : '',
+        edited_weekend_ot_hours:
+          att.override_weekend_ot_hours !== null && att.override_weekend_ot_hours !== undefined
+            ? String(att.override_weekend_ot_hours)
+            : '',
+        edited_stat_holiday_hours:
+          att.override_stat_holiday_hours !== null && att.override_stat_holiday_hours !== undefined
+            ? String(att.override_stat_holiday_hours)
+            : '',
         time_edit_reason: att.time_edit_reason || '',
         hours_edit_reason: att.hours_edit_reason || '',
         remarks: att.remarks || '',
@@ -2815,24 +2825,60 @@ const AttendancePage: React.FC = () => {
                           setSnackbar({ open: true, message: 'Cannot recalculate: No attendance record ID', severity: 'error' });
                           return;
                         }
-                        await attendanceAPI.recalculateAttendance(editingAttendance.id);
+
+                        const parseTime = (timeStr: string) => {
+                          if (!timeStr || timeStr.trim() === '') return null;
+                          if (timeStr.match(/^\d{2}:\d{2}:\d{2}$/)) return timeStr;
+                          if (timeStr.match(/^\d{2}:\d{2}$/)) return timeStr + ':00';
+                          return timeStr;
+                        };
+                        const parseHours = (hoursStr: string) => {
+                          if (!hoursStr || hoursStr.trim() === '') return null;
+                          const parsed = parseFloat(hoursStr);
+                          return isNaN(parsed) ? null : parsed;
+                        };
+                        const toTimeInput = (t?: string | null) => (t ? String(t).slice(0, 5) : '');
+
+                        // Save edited times first so recalculate uses the form values
+                        const saveData: any = {
+                          override_check_in: formData.edited_check_in ? parseTime(formData.edited_check_in) : null,
+                          override_check_out: formData.edited_check_out ? parseTime(formData.edited_check_out) : null,
+                          // Clear hour overrides so recalculated hours become the effective values
+                          override_regular_hours: null,
+                          override_ot_hours: null,
+                          override_weekend_ot_hours: null,
+                          override_stat_holiday_hours: parseHours(formData.edited_stat_holiday_hours),
+                          time_edit_reason: formData.time_edit_reason || null,
+                          hours_edit_reason: formData.hours_edit_reason || null,
+                          remarks: formData.remarks || null,
+                        };
+                        saveData.is_manual_override = !!(
+                          saveData.override_check_in ||
+                          saveData.override_check_out ||
+                          saveData.override_stat_holiday_hours !== null
+                        );
+
+                        await attendanceAPI.update(editingAttendance.id, saveData);
+                        const recalcResponse = await attendanceAPI.recalculateAttendance(editingAttendance.id);
+                        const updated = recalcResponse.data;
+
                         setSnackbar({ open: true, message: 'Hours recalculated successfully', severity: 'success' });
-                        // Reload attendance to get updated values
-                        loadAttendance();
-                        // Refresh form with updated attendance record
-                        const updated = attendance.find(a => a.id === editingAttendance.id);
-                        if (updated) {
-                          setEditingAttendance(updated);
-                          setFormData({
-                            ...formData,
-                            check_in: updated.check_in || '',
-                            check_out: updated.check_out || '',
-                            edited_regular_hours: updated.override_regular_hours?.toString() || '',
-                            edited_ot_hours: updated.override_ot_hours?.toString() || '',
-                            edited_weekend_ot_hours: updated.override_weekend_ot_hours?.toString() || '',
-                            edited_stat_holiday_hours: updated.override_stat_holiday_hours?.toString() || '',
-                          });
-                        }
+                        setEditingAttendance(updated);
+                        setFormData({
+                          ...formData,
+                          check_in: updated.check_in || '',
+                          check_out: updated.check_out || '',
+                          edited_check_in: toTimeInput(updated.override_check_in),
+                          edited_check_out: toTimeInput(updated.override_check_out),
+                          edited_regular_hours: '',
+                          edited_ot_hours: '',
+                          edited_weekend_ot_hours: '',
+                          edited_stat_holiday_hours:
+                            updated.override_stat_holiday_hours != null
+                              ? String(updated.override_stat_holiday_hours)
+                              : '',
+                        });
+                        await loadAttendance();
                       } catch (error: any) {
                         setSnackbar({ open: true, message: `Error recalculating: ${error.response?.data?.detail || error.message}`, severity: 'error' });
                       } finally {

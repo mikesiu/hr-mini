@@ -217,7 +217,8 @@ def end_open_schedules(
     session=None,
 ) -> int:
     """
-    Set end_date on open or overlapping schedule assignments for an employee.
+    Set end_date on schedule assignments that are still open after end_date.
+    Includes assignments that start after end_date so a termination closes them too.
     Does not shorten assignments that already end on or before end_date.
     Returns the number of assignments updated.
     """
@@ -234,7 +235,6 @@ def end_open_schedules(
                         EmployeeSchedule.end_date.is_(None),
                         EmployeeSchedule.end_date > end_date,
                     ),
-                    EmployeeSchedule.effective_date <= end_date,
                 )
             )
         ).scalars().all())

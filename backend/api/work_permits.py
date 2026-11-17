@@ -99,6 +99,7 @@ async def create_work_permit_endpoint(
             employee_id=work_permit_data.employee_id,
             permit_type=work_permit_data.permit_type,
             expiry_date=work_permit_data.expiry_date,
+            renewed_date=work_permit_data.renewed_date,
             performed_by=current_user.get("username")
         )
         return permit
@@ -126,6 +127,8 @@ async def update_work_permit_endpoint(
             update_data["permit_type"] = work_permit_data.permit_type
         if work_permit_data.expiry_date is not None:
             update_data["expiry_date"] = work_permit_data.expiry_date
+        if work_permit_data.renewed_date is not None and getattr(existing_permit, "status", None) == "renewed":
+            update_data["renewed_date"] = work_permit_data.renewed_date
         
         if not update_data:
             return existing_permit

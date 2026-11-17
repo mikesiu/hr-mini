@@ -50,6 +50,77 @@ from models.work_schedule import WorkSchedule
 router = APIRouter()
 
 
+def _compute_rounded_and_hours_for_attendance(attendance) -> dict:
+    """
+    Compute rounded check-in/out and regular/OT/weekend OT hours from the
+    attendance record's effective (override or original) punch times.
+    """
+    effective_check_in = attendance.get_effective_check_in()
+    effective_check_out = attendance.get_effective_check_out()
+    if not effective_check_in or not effective_check_out:
+        raise ValueError("Check-in and check-out times are required for recalculation")
+
+    rounded_check_in = round_check_in(effective_check_in)
+    rounded_check_out = round_check_out(effective_check_out)
+
+    employee_schedule = get_schedule_for_date(attendance.employee_id, attendance.date)
+    employment = get_current_employment(attendance.employee_id, attendance.date)
+    is_driver = employment.is_driver if employment else False
+    count_all_ot = getattr(employment, "count_all_ot", False) if employment else False
+
+    schedule = None
+    if employee_schedule:
+        try:
+            work_schedule = employee_schedule.schedule if hasattr(employee_schedule, "schedule") else None
+            if work_schedule and isinstance(work_schedule, WorkSchedule) and hasattr(work_schedule, "get_day_times"):
+                schedule = work_schedule
+        except (AttributeError, TypeError):
+            schedule = None
+
+    day_of_week = attendance.date.weekday()
+    is_weekend = day_of_week >= 5
+    schedule_start, schedule_end = (None, None)
+    weekday_schedule_start = None
+    if schedule:
+        try:
+            schedule_start, schedule_end = schedule.get_day_times(day_of_week)
+            if is_weekend:
+                for weekday in range(5):
+                    weekday_start, _ = schedule.get_day_times(weekday)
+                    if weekday_start:
+                        weekday_schedule_start = weekday_start
+                        break
+        except (AttributeError, TypeError):
+            schedule_start, schedule_end = (None, None)
+
+    is_stat_holiday = False
+    if employment and employment.company_id:
+        holidays = get_holidays_in_range(
+            employment.company_id, attendance.date, attendance.date, attendance.employee_id
+        )
+        is_stat_holiday = attendance.date in holidays
+
+    regular, ot, weekend_ot = calculate_hours_worked(
+        rounded_check_in,
+        rounded_check_out,
+        schedule_start,
+        schedule_end,
+        attendance.date,
+        is_driver,
+        weekday_schedule_start,
+        count_all_ot,
+        is_stat_holiday=is_stat_holiday,
+    )
+
+    return {
+        "rounded_check_in": rounded_check_in,
+        "rounded_check_out": rounded_check_out,
+        "regular_hours": regular,
+        "ot_hours": ot,
+        "weekend_ot_hours": weekend_ot,
+    }
+
+
 def _scheduled_hours_for_date(employee_id: str, work_date: date) -> float:
     """Return scheduled hours for an employee on a date, or 0 if none."""
     employee_schedule = get_schedule_for_date(employee_id, work_date)
@@ -2251,6 +2322,33 @@ async def update_attendance_record(
         )
         if not attendance:
             raise HTTPException(status_code=404, detail="Attendance record not found")
+
+        # Keep rounded times (and hours when no manual hour overrides) in sync with
+        # effective punch times after a time edit.
+        if has_override_times or original_check_in is not _UNSET or original_check_out is not _UNSET:
+            try:
+                computed = _compute_rounded_and_hours_for_attendance(attendance)
+                update_kwargs = {
+                    "attendance_id": attendance_id,
+                    "rounded_check_in": computed["rounded_check_in"],
+                    "rounded_check_out": computed["rounded_check_out"],
+                    "performed_by": current_user.get("username"),
+                }
+                # Only overwrite calculated hours when the user did not supply hour overrides
+                if not has_override_hours:
+                    update_kwargs.update({
+                        "regular_hours": computed["regular_hours"],
+                        "ot_hours": computed["ot_hours"],
+                        "weekend_ot_hours": computed["weekend_ot_hours"],
+                        "override_regular_hours": None,
+                        "override_ot_hours": None,
+                        "override_weekend_ot_hours": None,
+                    })
+                attendance = update_attendance(**update_kwargs) or attendance
+            except ValueError:
+                # Missing check-in/out — leave hours as-is
+                pass
+
         return attendance
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -2268,81 +2366,30 @@ async def recalculate_attendance_hours(
         existing = get_attendance(attendance_id)
         if not existing:
             raise HTTPException(status_code=404, detail="Attendance record not found")
-        
-        # Get effective check-in/check-out times (override if exists, otherwise original)
-        effective_check_in = existing.get_effective_check_in()
-        effective_check_out = existing.get_effective_check_out()
-        
-        if not effective_check_in or not effective_check_out:
-            raise HTTPException(status_code=400, detail="Check-in and check-out times are required for recalculation")
-        
-        # Calculate rounded times from effective times
-        # Check-in rounds UP, check-out rounds DOWN
-        rounded_check_in = round_check_in(effective_check_in)
-        rounded_check_out = round_check_out(effective_check_out)
-        
-        # Get employee schedule and employment for calculation
-        employee_schedule = get_schedule_for_date(existing.employee_id, existing.date)
-        employment = get_current_employment(existing.employee_id, existing.date)
-        is_driver = employment.is_driver if employment else False
-        
-        schedule = None
-        if employee_schedule:
-            try:
-                from models.work_schedule import WorkSchedule
-                work_schedule = employee_schedule.schedule if hasattr(employee_schedule, 'schedule') else None
-                if work_schedule and isinstance(work_schedule, WorkSchedule) and hasattr(work_schedule, 'get_day_times'):
-                    schedule = work_schedule
-            except (AttributeError, TypeError):
-                schedule = None
-        day_of_week = existing.date.weekday()
-        is_weekend = day_of_week >= 5
-        schedule_start, schedule_end = (None, None)
-        weekday_schedule_start = None
-        if schedule:
-            try:
-                from models.work_schedule import WorkSchedule
-                if isinstance(schedule, WorkSchedule) and hasattr(schedule, 'get_day_times'):
-                    schedule_start, schedule_end = schedule.get_day_times(day_of_week)
-                    # For weekends, get weekday schedule start time (try Monday-Friday) for weekend OT calculation
-                    if is_weekend:
-                        # Try Monday through Friday to find a weekday schedule start time
-                        for weekday in range(5):  # 0=Monday to 4=Friday
-                            weekday_start, _ = schedule.get_day_times(weekday)
-                            if weekday_start:
-                                weekday_schedule_start = weekday_start
-                                break
-            except (AttributeError, TypeError):
-                schedule_start, schedule_end = (None, None)
-        
-        is_stat_holiday = False
-        if employment and employment.company_id:
-            holidays = get_holidays_in_range(
-                employment.company_id, existing.date, existing.date, existing.employee_id
-            )
-            is_stat_holiday = existing.date in holidays
 
-        # Recalculate hours based on effective rounded times
-        regular, ot, weekend_ot = calculate_hours_worked(
-            rounded_check_in, rounded_check_out, schedule_start, schedule_end,
-            existing.date, is_driver, weekday_schedule_start,
-            is_stat_holiday=is_stat_holiday,
-        )
-        
-        # Update only the calculated fields (not override fields)
+        try:
+            computed = _compute_rounded_and_hours_for_attendance(existing)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        # Update calculated fields and clear hour overrides so recalculated values show
         attendance = update_attendance(
             attendance_id=attendance_id,
-            rounded_check_in=rounded_check_in,
-            rounded_check_out=rounded_check_out,
-            regular_hours=regular,
-            ot_hours=ot,
-            weekend_ot_hours=weekend_ot,
-            # stat_holiday_hours is not recalculated here (it's set separately)
+            rounded_check_in=computed["rounded_check_in"],
+            rounded_check_out=computed["rounded_check_out"],
+            regular_hours=computed["regular_hours"],
+            ot_hours=computed["ot_hours"],
+            weekend_ot_hours=computed["weekend_ot_hours"],
+            override_regular_hours=None,
+            override_ot_hours=None,
+            override_weekend_ot_hours=None,
             performed_by=current_user.get('username'),
         )
         if not attendance:
             raise HTTPException(status_code=404, detail="Attendance record not found")
         return attendance
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

@@ -2,11 +2,11 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import List
 
-from sqlalchemy import or_, select
+from sqlalchemy import inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
-from models.base import SessionLocal
+from models.base import SessionLocal, engine
 from models.employee import Employee
 from models.termination import Termination
 from models.work_permit import WorkPermit
@@ -14,18 +14,112 @@ from services.audit_service import log_action
 from utils.serialization import model_to_dict
 
 
+_schema_ready = False
+
+
+def ensure_work_permit_schema() -> None:
+    """Add renewal columns on existing databases and close extra open permits."""
+    global _schema_ready
+    if _schema_ready:
+        return
+
+    inspector = inspect(engine)
+    if "work_permits" not in inspector.get_table_names():
+        _schema_ready = True
+        return
+
+    columns = {column["name"] for column in inspector.get_columns("work_permits")}
+    with engine.begin() as conn:
+        if "status" not in columns:
+            conn.execute(text(
+                "ALTER TABLE work_permits ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'active'"
+            ))
+        if "renewed_date" not in columns:
+            conn.execute(text(
+                "ALTER TABLE work_permits ADD COLUMN renewed_date DATE NULL"
+            ))
+
+    _close_duplicate_active_permits()
+    _schema_ready = True
+
+
+def _close_duplicate_active_permits() -> int:
+    """Keep the latest permit active. Older open permits are closed as renewed."""
+    today = date.today()
+    closed = 0
+    with SessionLocal() as session:
+        permits = session.execute(
+            select(WorkPermit).where(
+                or_(WorkPermit.status == "active", WorkPermit.status.is_(None))
+            )
+        ).scalars().all()
+
+        grouped: dict[str, list[WorkPermit]] = {}
+        for permit in permits:
+            grouped.setdefault(permit.employee_id, []).append(permit)
+
+        audits: list[tuple[int, dict, dict]] = []
+        for group in grouped.values():
+            if len(group) == 1:
+                if not group[0].status:
+                    group[0].status = "active"
+                continue
+
+            keeper = max(group, key=lambda permit: permit.id or 0)
+            for permit in group:
+                if permit.id == keeper.id:
+                    permit.status = "active"
+                    continue
+                before = model_to_dict(permit)
+                permit.status = "renewed"
+                if permit.renewed_date is None:
+                    permit.renewed_date = today
+                audits.append((permit.id, before, model_to_dict(permit)))
+                closed += 1
+
+        session.commit()
+
+    for permit_id, before, after in audits:
+        log_action(
+            entity="work_permit",
+            entity_id=permit_id,
+            action="update",
+            changed_by="system",
+            before=before,
+            after=after,
+        )
+    return closed
+
+
 def create_work_permit(
     employee_id: str,
     permit_type: str,
     expiry_date: date,
     *,
+    renewed_date: date | None = None,
     performed_by: str | None = None,
 ) -> WorkPermit:
+    ensure_work_permit_schema()
+    close_on = renewed_date or date.today()
     with SessionLocal() as session:
+        previous = session.execute(
+            select(WorkPermit).where(
+                WorkPermit.employee_id == employee_id,
+                or_(WorkPermit.status == "active", WorkPermit.status.is_(None)),
+            )
+        ).scalars().all()
+        closed_audits: list[tuple[int, dict, dict]] = []
+        for old in previous:
+            before = model_to_dict(old)
+            old.status = "renewed"
+            old.renewed_date = close_on
+            closed_audits.append((old.id, before, model_to_dict(old)))
+
         work_permit = WorkPermit(
             employee_id=employee_id,
             permit_type=permit_type,
             expiry_date=expiry_date,
+            status="active",
         )
         session.add(work_permit)
         try:
@@ -48,6 +142,15 @@ def create_work_permit(
             changed_by=performed_by,
             after=model_to_dict(work_permit),
         )
+        for closed_id, before, after in closed_audits:
+            log_action(
+                entity="work_permit",
+                entity_id=closed_id,
+                action="update",
+                changed_by=performed_by,
+                before=before,
+                after=after,
+            )
         return work_permit
 
 
@@ -78,7 +181,8 @@ def get_current_work_permit(employee_id: str) -> WorkPermit | None:
             select(WorkPermit)
             .options(joinedload(WorkPermit.employee))
             .where(WorkPermit.employee_id == employee_id)
-            .order_by(WorkPermit.expiry_date.desc())
+            .where(or_(WorkPermit.status == "active", WorkPermit.status.is_(None)))
+            .order_by(WorkPermit.id.desc())
             .limit(1)
         )
         return session.execute(stmt).scalars().unique().first()
@@ -155,6 +259,7 @@ def get_expiring_work_permits(days_ahead: int = 30) -> List[WorkPermit]:
             .outerjoin(Termination, Termination.employee_id == Employee.id)
             .options(joinedload(WorkPermit.employee))
             .where(WorkPermit.expiry_date <= cutoff_date)
+            .where(or_(WorkPermit.status == "active", WorkPermit.status.is_(None)))
             .where(Employee.status != "Terminated")
             .where(
                 or_(

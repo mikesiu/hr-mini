@@ -1,0 +1,29 @@
+---
+description: UI and styling standards for Vite + React + TypeScript + shadcn/ui + MUI
+globs: frontend/src/**/*.tsx
+alwaysApply: true
+---
+
+# UI & Component Architecture Rules
+
+## 1. Library Boundary (MUI vs. shadcn/ui)
+- **All new features, pages, and components** must be built using **shadcn/ui** (`@/components/ui/*`), **Tailwind CSS v4**, and **Lucide icons** (`lucide-react`).
+- **Do not** import `@mui/material` or `@mui/icons-material` into newly created files.
+- When editing **existing MUI pages**, match their existing MUI patterns unless explicitly asked to refactor that page to shadcn/ui.
+- **Never nest overlays** across libraries (e.g., do not open a shadcn `Dialog` or `Popover` inside an MUI `Modal`/`Drawer`, or vice versa) to avoid z-index and focus-trap conflicts.
+
+## 2. Tailwind v4 Without Preflight
+- `preflight` is intentionally disabled in `src/index.css` to preserve MUI's `CssBaseline`.
+- Because Tailwind's base border reset is off, **always explicitly include `border-solid`** whenever applying borders (e.g., `border border-solid border-border` instead of just `border`).
+- Use semantic theme tokens (`bg-background`, `text-foreground`, `bg-card`, `text-muted-foreground`, `border-border`, `bg-primary`) rather than raw hex codes or hardcoded `slate-*`/`gray-*` colors.
+
+## 3. shadcn/ui Workflow
+- Before creating custom primitives (inputs, modals, tables, dropdowns, badges, tabs), check `frontend/src/components/ui/` first.
+- If a standard shadcn/ui component is missing, install it via the CLI (`npx shadcn@latest add <component>`) inside `frontend/` rather than hand-coding a custom replica.
+- Use `cn()` from `@/lib/utils` for conditional class merging.
+
+## 4. Visual Polish & States
+- Every data-driven view must include:
+  1. A **loading skeleton** matching the final layout dimensions.
+  2. A clean **empty state** with an icon, concise explanation, and clear primary action.
+  3. Subtle interactive states (`transition-colors`, focus-visible rings, and disabled states).

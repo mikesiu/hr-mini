@@ -12,8 +12,8 @@ if exist ".venv\Scripts\activate.bat" call ".venv\Scripts\activate.bat"
 if exist "backend\.venv\Scripts\activate.bat" call "backend\.venv\Scripts\activate.bat"
 
 start "HR Mini DEV backend :%DEV_API_PORT%" cmd /k "cd /d backend && python -m uvicorn main:app --host 127.0.0.1 --port %DEV_API_PORT% --reload"
-start "HR Mini DEV frontend :3000" cmd /k "cd /d frontend && set REACT_APP_API_PORT=%DEV_API_PORT%&& set PORT=3000&& npm start"
+start "HR Mini DEV frontend :3000" cmd /k "cd /d frontend && set VITE_API_PORT=%DEV_API_PORT%&& npm run dev"
 
 echo Dev servers starting in two new windows.
-echo Open http://localhost:3000 once the frontend window says "Compiled".
+echo Open http://localhost:3000 once the frontend window says "ready".
 endlocal

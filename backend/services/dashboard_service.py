@@ -233,6 +233,7 @@ def get_work_permit_events(start_date: date, end_date: date) -> List[PayrollCale
             .join(Employee, Employee.id == WorkPermit.employee_id)
             .where(WorkPermit.expiry_date >= start_date)
             .where(WorkPermit.expiry_date <= end_date)
+            .where(WorkPermit.status == "active")
             .where(Employee.status != "Terminated")
         ).all()
 

@@ -78,11 +78,13 @@ export async function promptExcelSaveDialog(
  * Write bytes to a previously chosen file handle, or fall back to blob download.
  */
 export async function writeOrDownloadBytes(
-  data: Uint8Array,
+  rawData: Uint8Array,
   filename: string,
   fileHandle: SaveFilePickerHandle | null,
   mimeType: string = EXCEL_MIME
 ): Promise<DownloadResult> {
+  // TS 5.7+ types Uint8Array as ArrayBufferLike; Blob/FileSystem APIs want ArrayBuffer.
+  const data = rawData as Uint8Array<ArrayBuffer>;
   if (data.byteLength < 1) {
     throw new Error('Download file is empty');
   }

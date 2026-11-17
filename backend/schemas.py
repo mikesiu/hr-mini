@@ -542,14 +542,18 @@ class WorkPermitBase(BaseModel):
     expiry_date: date
 
 class WorkPermitCreate(WorkPermitBase):
-    pass
+    # Date the previous permit was closed. Used only when this employee already has an active permit.
+    renewed_date: Optional[date] = None
 
 class WorkPermitUpdate(BaseModel):
     permit_type: Optional[str] = Field(None, max_length=100)
     expiry_date: Optional[date] = None
+    renewed_date: Optional[date] = None
 
 class WorkPermitResponse(WorkPermitBase):
     id: int
+    status: str = "active"
+    renewed_date: Optional[date] = None
     employee: Optional[EmployeeResponse] = None
     
     class Config:
@@ -832,6 +836,7 @@ class EmployeeScheduleResponse(BaseModel):
     id: int
     employee_id: str
     employee_name: Optional[str] = None  # Employee full name for display
+    employee_status: Optional[str] = None
     schedule_id: int
     effective_date: str
     end_date: Optional[str] = None
