@@ -22,7 +22,21 @@ export default defineConfig({
     // The FastAPI backend, hr_mini.spec and start scripts serve frontend/build.
     outDir: 'build',
     emptyOutDir: true,
-    // Main bundle (~1.8 MB, MUI + exceljs + jspdf) is served locally by FastAPI; not code-split yet.
-    chunkSizeWarningLimit: 2000,
+    // Large vendor libraries get their own chunks so the app chunk stays small and cacheable.
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: 'vendor-mui-x', test: /node_modules[\\/]@mui[\\/]x-/ },
+            { name: 'vendor-pdf', test: /node_modules[\\/](jspdf|jspdf-autotable|fflate|fast-png)[\\/]/ },
+            { name: 'vendor-mui', test: /node_modules[\\/](@mui|@emotion)[\\/]/ },
+            { name: 'vendor-radix', test: /node_modules[\\/](@radix-ui|radix-ui|lucide-react)[\\/]/ },
+            { name: 'vendor-react', test: /node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/ },
+          ],
+        },
+      },
+    },
+    // exceljs alone is ~930 kB (lazy-loaded already); everything else stays well below this.
+    chunkSizeWarningLimit: 1000,
   },
 });

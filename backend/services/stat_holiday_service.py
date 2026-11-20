@@ -12,6 +12,7 @@ from repos.employment_repo import get_current_employment
 from models.base import SessionLocal
 from models.holiday import Holiday
 from models.employee import Employee
+from models.employment import Employment
 from sqlalchemy import select, and_
 
 
@@ -71,11 +72,18 @@ def calculate_stat_holiday_entitlement(
     if not employment:
         logger.info(f"Stat holiday calc for {employee_id} on {holiday_date}: No employment found")
         return 0.0
-    
-    if employment.start_date:
-        days_employed = (holiday_date - employment.start_date).days
+
+    # BC ESA 30-day rule is continuous employment with the employer, not the
+    # start of the current Employment row (transfers / re-created assignments
+    # can reset Employment.start_date while hire_date stays continuous).
+    employment_start = _continuous_employment_start_date(employee_id, company_id, holiday_date)
+    if employment_start:
+        days_employed = (holiday_date - employment_start).days
         if days_employed < 30:
-            logger.info(f"Stat holiday calc for {employee_id} on {holiday_date}: Only {days_employed} days employed (need 30)")
+            logger.info(
+                f"Stat holiday calc for {employee_id} on {holiday_date}: "
+                f"Only {days_employed} days employed from {employment_start} (need 30)"
+            )
             return 0.0
     
     # Calculate average daily hours from last 30 days before the holiday
@@ -86,6 +94,54 @@ def calculate_stat_holiday_entitlement(
     
     logger.info(f"Stat holiday calc for {employee_id} on {holiday_date}: avg_daily_hours={avg_daily_hours}")
     return avg_daily_hours
+
+
+def _continuous_employment_start_date(
+    employee_id: str,
+    company_id: str,
+    as_of: date,
+) -> Optional[date]:
+    """
+    Start date for BC ESA continuous-employment eligibility.
+
+    Prefer seniority_start_date / hire_date. Fall back to the earliest start of
+    contiguous Employment records at the company as of the holiday date.
+    """
+    with SessionLocal() as session:
+        employee = session.get(Employee, employee_id)
+        if employee:
+            seniority = getattr(employee, "seniority_start_date", None)
+            if seniority:
+                return seniority
+            if employee.hire_date:
+                return employee.hire_date
+
+        rows = session.execute(
+            select(Employment)
+            .where(
+                and_(
+                    Employment.employee_id == employee_id,
+                    Employment.company_id == company_id,
+                    Employment.start_date <= as_of,
+                )
+            )
+            .order_by(Employment.start_date.desc())
+        ).scalars().all()
+
+    if not rows:
+        return None
+
+    # Walk backward through contiguous company employment segments
+    continuous_start = rows[0].start_date
+    prev_start = rows[0].start_date
+    for row in rows[1:]:
+        # Contiguous or overlapping with the later segment
+        if row.end_date is None or row.end_date >= (prev_start - timedelta(days=1)):
+            continuous_start = row.start_date
+            prev_start = row.start_date
+        else:
+            break
+    return continuous_start
 
 
 def _calculate_average_daily_hours(

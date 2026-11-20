@@ -1,110 +1,39 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Box, Typography, Paper, Button, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, IconButton, Dialog, DialogTitle,
-  DialogContent, DialogActions, TextField, Grid, Alert, Snackbar,
-  CircularProgress, Tabs, Tab, FormControl, InputLabel, Select, MenuItem,
-  Autocomplete,
-} from '@mui/material';
-import {
-  Add, Edit, Upload, FileDownload, Clear, Refresh, Delete, Print,
-} from '@mui/icons-material';
+  Building2, CalendarSearch, ChevronDown, FilterX, Loader2, Plus, RefreshCw,
+  SlidersHorizontal, Trash2, Upload,
+} from 'lucide-react';
 import { attendanceAPI, companyAPI, employeeAPI } from '../api/client';
 import { useCompanyFilter } from '../contexts/CompanyFilterContext';
-import CompanyFilter from '../components/CompanyFilter';
 import { format } from 'date-fns';
+import AppToast from '../components/AppToast';
+import AttendanceTable from '../components/attendance/AttendanceTable';
+import EditAttendanceDialog from '../components/attendance/EditAttendanceDialog';
+import ManualEntryTab from '../components/attendance/ManualEntryTab';
+import AttendanceReportTab from '../components/attendance/AttendanceReportTab';
+import SummaryStrip from '../components/attendance/SummaryStrip';
+import {
+  UploadCsvDialog, DeleteRangeDialog, OverrideSubtotalsDialog,
+} from '../components/attendance/AttendanceMiscDialogs';
+import {
+  ALL_VALUE, emptyManualEntry, sumEffectiveHours,
+} from '../components/attendance/attendanceHelpers';
+import type {
+  Attendance, AttendanceReport, AttendanceDetailedReport, PayPeriod, Employee,
+  DetailedRowWithSubtotal, AttendanceDetailRow,
+} from '../components/attendance/attendanceTypes';
+import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { cn } from '@/lib/utils';
 
-interface Attendance {
-  id?: number;
-  employee_id: string;
-  employee_name?: string;
-  date: string;
-  check_in?: string;
-  check_out?: string;
-  rounded_check_in?: string;
-  rounded_check_out?: string;
-  regular_hours: number;
-  ot_hours: number;
-  weekend_ot_hours: number;
-  stat_holiday_hours: number;
-  is_manual_override: boolean;
-  override_check_in?: string;
-  override_check_out?: string;
-  override_regular_hours?: number;
-  override_ot_hours?: number;
-  override_weekend_ot_hours?: number;
-  override_stat_holiday_hours?: number;
-  time_edit_reason?: string;
-  hours_edit_reason?: string;
-  notes?: string;
-  remarks?: string | null;
-  leave_type?: string;
-  stat_holiday_name?: string;
-}
 
-interface AttendanceReport {
-  summary: Array<{
-    employee_id: string;
-    employee_name: string;
-    total_regular_hours: number;
-    total_ot_hours: number;
-    total_weekend_ot_hours: number;
-    total_stat_holiday_hours: number;
-    total_days: number;
-  }>;
-  total_regular_hours: number;
-  total_ot_hours: number;
-  total_weekend_ot_hours: number;
-  total_stat_holiday_hours: number;
-}
-
-interface AttendanceDetailRow {
-  employee_id: string;
-  employee_name: string;
-  date: string;
-  check_in?: string;
-  check_out?: string;
-  day_type: string;
-  regular_hours: number;
-  ot_hours: number;
-  weekend_ot_hours: number;
-  stat_holiday_hours: number;
-  leave_type?: string;
-  stat_holiday_name?: string;
-  remarks?: string | null;
-}
-
-interface AttendanceDetailedReport {
-  details: AttendanceDetailRow[];
-}
-
-interface PayPeriod {
-  start_date: string;
-  end_date: string;
-  period_number: number;
-  year: number;
-  duration_days: number;
-}
-
-interface Employee {
-  id: string;
-  full_name: string;
-  first_name: string;
-  last_name: string;
-}
-
-interface DetailedRowSubtotal {
-  employee_id: string;
-  employee_name: string;
-  regular_hours: number;
-  ot_hours: number;
-  weekend_ot_hours: number;
-  stat_holiday_hours: number;
-}
-
-type DetailedRowWithSubtotal =
-  | { type: 'detail'; row: AttendanceDetailRow }
-  | { type: 'subtotal'; subtotal: DetailedRowSubtotal };
 
 function applyPeriodOverrideTotals(
   employeeId: string,
@@ -337,7 +266,7 @@ function generateDetailedPrintTable(rowsWithSubtotals: DetailedRowWithSubtotal[]
 }
 
 const AttendancePage: React.FC = () => {
-  const { selectedCompanyId, setSelectedCompanyId, selectedCompany } = useCompanyFilter();
+  const { selectedCompanyId, setSelectedCompanyId, selectedCompany, companies } = useCompanyFilter();
   const [tabValue, setTabValue] = useState<number>(0);
   const [attendance, setAttendance] = useState<Attendance[]>([]);
   const [report, setReport] = useState<AttendanceReport | null>(null);
@@ -1334,175 +1263,11 @@ const AttendancePage: React.FC = () => {
     }
   };
 
-  return (
-    <Box sx={{ p: 3 }}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" component="h1">
-          Attendance Management
-        </Typography>
-        <Box>
-          <Button
-            variant="outlined"
-            startIcon={<Upload />}
-            onClick={() => setUploadDialogOpen(true)}
-            sx={{ mr: 1 }}
-          >
-            Upload CSV
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<Add />}
-            onClick={() => {
-              setTabValue(1);
-              // Initialize manual entry if not already initialized
-              if (manualEntries.length === 0) {
-                setManualEntries([{ 
-                  id: '1', 
-                  date: '', 
-                  check_in: '', 
-                  check_out: '', 
-                  regular_hours: '', 
-                  ot_hours: '', 
-                  weekend_ot_hours: '', 
-                  stat_holiday_hours: '' 
-                }]);
-              }
-            }}
-          >
-            Manual Entry
-          </Button>
-        </Box>
-      </Box>
 
-      {/* Company Filter */}
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="h6" gutterBottom>
-          Select Company
-        </Typography>
-        <CompanyFilter
-          value={selectedCompanyId}
-          onChange={setSelectedCompanyId}
-          showAllOption={false}
-          label="Select Company"
-          size="small"
-        />
-      </Paper>
+  const [batchOpen, setBatchOpen] = useState(false);
+  const closeToast = useCallback(() => setSnackbar((s) => ({ ...s, open: false })), []);
 
-      {!selectedCompanyId && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Please select a company above to view and manage attendance.
-        </Alert>
-      )}
-
-      <Paper>
-        <Tabs value={tabValue} onChange={(e, v) => setTabValue(v)}>
-          <Tab label="Attendance List" />
-          <Tab label="Manual Entry" />
-          <Tab label="Report" />
-        </Tabs>
-
-        {tabValue === 0 && (
-          <Box sx={{ p: 2 }}>
-            {/* Filter Section */}
-            <Paper sx={{ p: 2, mb: 2 }}>
-              <Typography variant="h6" gutterBottom>
-                Filters
-              </Typography>
-              <Grid container spacing={2} alignItems="center">
-                <Grid item xs={12} sm={3}>
-                  <TextField
-                    fullWidth
-                    label="Year"
-                    type="number"
-                    value={selectedYear}
-                    onChange={(e) => setSelectedYear(parseInt(e.target.value) || new Date().getFullYear())}
-                    disabled={!selectedCompanyId}
-                    InputLabelProps={{ shrink: true }}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={4}>
-                  <FormControl fullWidth disabled={!selectedCompanyId || payPeriods.length === 0}>
-                    <InputLabel>Pay Period</InputLabel>
-                    <Select
-                      value={selectedPayPeriod ? `${selectedPayPeriod.period_number}` : ''}
-                      onChange={(e) => {
-                        const periodNum = parseInt(e.target.value);
-                        const period = payPeriods.find(p => p.period_number === periodNum);
-                        setSelectedPayPeriod(period || null);
-                      }}
-                      label="Pay Period"
-                    >
-                      <MenuItem value="">
-                        <em>All Pay Periods</em>
-                      </MenuItem>
-                      {payPeriods.map((period) => (
-                        <MenuItem key={period.period_number} value={period.period_number.toString()}>
-                          Period {period.period_number}: {formatDate(period.start_date)} - {formatDate(period.end_date)}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-                <Grid item xs={12} sm={3}>
-                  <FormControl fullWidth disabled={!selectedCompanyId || employees.length === 0}>
-                    <InputLabel>Employee</InputLabel>
-                    <Select
-                      value={selectedEmployeeId}
-                      onChange={(e) => setSelectedEmployeeId(e.target.value)}
-                      label="Employee"
-                    >
-                      <MenuItem value="">
-                        <em>All Employees</em>
-                      </MenuItem>
-                      {employees.map((emp) => (
-                        <MenuItem key={emp.id} value={emp.id}>
-                          {emp.full_name || `${emp.first_name} ${emp.last_name}`}
-                        </MenuItem>
-                      ))}
-                    </Select>
-                  </FormControl>
-                </Grid>
-                <Grid item xs={12} sm={2}>
-                  <Button
-                    variant="outlined"
-                    startIcon={<Clear />}
-                    onClick={() => {
-                      setSelectedPayPeriod(null);
-                      setSelectedEmployeeId('');
-                    }}
-                    disabled={!selectedPayPeriod && !selectedEmployeeId}
-                    fullWidth
-                    sx={{ height: '56px' }}
-                  >
-                    Clear Filters
-                  </Button>
-                </Grid>
-              </Grid>
-              <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', flex: 1 }}>
-                  <TextField
-                    label="Recalculate From"
-                    type="date"
-                    value={recalcStartDate}
-                    onChange={(e) => setRecalcStartDate(e.target.value)}
-                    size="small"
-                    InputLabelProps={{ shrink: true }}
-                    sx={{ minWidth: 180 }}
-                  />
-                  <TextField
-                    label="Recalculate To"
-                    type="date"
-                    value={recalcEndDate}
-                    onChange={(e) => setRecalcEndDate(e.target.value)}
-                    size="small"
-                    InputLabelProps={{ shrink: true }}
-                    sx={{ minWidth: 180 }}
-                  />
-                  <Button
-                    variant="contained"
-                    color="secondary"
-                    startIcon={<Refresh />}
-                    onClick={async () => {
+  const handleRecalculateRange = async () => {
                       // Use pay period dates if available, otherwise use manual dates
                       const startDate = selectedPayPeriod?.start_date || recalcStartDate;
                       const endDate = selectedPayPeriod?.end_date || recalcEndDate;
@@ -1545,546 +1310,9 @@ const AttendancePage: React.FC = () => {
                       } finally {
                         setLoading(false);
                       }
-                    }}
-                    disabled={loading || (!selectedPayPeriod && (!recalcStartDate || !recalcEndDate))}
-                  >
-                    Recalculate Hours
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    color="error"
-                    startIcon={<Delete />}
-                    onClick={() => setDeleteDialogOpen(true)}
-                    sx={{ ml: 1 }}
-                  >
-                    Delete by Date Range
-                  </Button>
-                </Box>
-              </Box>
-            </Paper>
+  };
 
-            {loading ? (
-              <Box display="flex" justifyContent="center" p={3}>
-                <CircularProgress />
-              </Box>
-            ) : (
-              <TableContainer>
-                <Table size="small" sx={{ '& .MuiTableCell-root': { padding: '4px 8px' } }}>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ fontSize: '0.875rem', padding: '6px 8px', whiteSpace: 'normal', lineHeight: '1.2', maxWidth: '120px' }}>Employee<br />Name</TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', padding: '6px 8px', whiteSpace: 'normal', lineHeight: '1.2' }}>Date</TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', padding: '6px 8px', whiteSpace: 'normal', lineHeight: '1.2' }}>Leave/Stat<br />Holiday</TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', padding: '6px 8px', whiteSpace: 'normal', lineHeight: '1.2' }}>Check-In<br />(Orig)</TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', padding: '6px 8px', whiteSpace: 'normal', lineHeight: '1.2' }}>Check-Out<br />(Orig)</TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', padding: '6px 8px', whiteSpace: 'normal', lineHeight: '1.2' }}>Check-In<br />(Rnd)</TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', padding: '6px 8px', whiteSpace: 'normal', lineHeight: '1.2' }}>Check-Out<br />(Rnd)</TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', padding: '6px 8px', whiteSpace: 'normal', lineHeight: '1.2' }}>Reg<br />Hours</TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', padding: '6px 8px', whiteSpace: 'normal', lineHeight: '1.2' }}>OT<br />Hours</TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', padding: '6px 8px', whiteSpace: 'normal', lineHeight: '1.2' }}>Weekend<br />OT</TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', padding: '6px 8px', whiteSpace: 'normal', lineHeight: '1.2' }}>Stat<br />Holiday</TableCell>
-                      <TableCell sx={{ fontSize: '0.875rem', padding: '6px 8px', whiteSpace: 'normal', lineHeight: '1.2' }}>Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {attendance.map((att) => {
-                      const hasTimeEdits = att.override_check_in || att.override_check_out;
-                      const hasHoursEdits = (att.override_regular_hours !== null && att.override_regular_hours !== undefined) || 
-                            (att.override_ot_hours !== null && att.override_ot_hours !== undefined) || 
-                            (att.override_weekend_ot_hours !== null && att.override_weekend_ot_hours !== undefined) || 
-                            (att.override_stat_holiday_hours !== null && att.override_stat_holiday_hours !== undefined);
-                      const effectiveCheckIn = att.override_check_in || att.check_in;
-                      const effectiveCheckOut = att.override_check_out || att.check_out;
-                      const effectiveRegular = (att.override_regular_hours !== null && att.override_regular_hours !== undefined) 
-                        ? att.override_regular_hours 
-                        : (att.regular_hours ?? 0.0);
-                      const effectiveOT = (att.override_ot_hours !== null && att.override_ot_hours !== undefined) 
-                        ? att.override_ot_hours 
-                        : (att.ot_hours ?? 0.0);
-                      const effectiveWeekendOT = (att.override_weekend_ot_hours !== null && att.override_weekend_ot_hours !== undefined) 
-                        ? att.override_weekend_ot_hours 
-                        : (att.weekend_ot_hours ?? 0.0);
-                      const effectiveStatHoliday = (att.override_stat_holiday_hours !== null && att.override_stat_holiday_hours !== undefined) 
-                        ? att.override_stat_holiday_hours 
-                        : (att.stat_holiday_hours ?? 0.0);
-                      
-                      // Determine if it's a weekend
-                      // Parse date string directly to avoid timezone issues
-                      // Format: YYYY-MM-DD
-                      const [year, month, day] = att.date.split('-').map(Number);
-                      const dateObj = new Date(year, month - 1, day); // month is 0-indexed
-                      const dayOfWeek = dateObj.getDay();
-                      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // Sunday = 0, Saturday = 6
-                      
-                      // Determine if it's a day with no data (no attendance, no leave, no holiday)
-                      const hasNoData = !att.id && !att.leave_type && !att.stat_holiday_name && !att.check_in && !att.check_out;
-                      
-                      return (
-                        <TableRow 
-                          key={att.id || `virtual-${att.employee_id}-${att.date}`}
-                          sx={{
-                            backgroundColor: isWeekend ? 'rgba(0, 0, 0, 0.12)' : 'transparent',
-                            '& td': {
-                              fontSize: '0.875rem', // Smaller font size
-                              color: hasNoData ? 'text.secondary' : 'inherit',
-                              padding: '4px 8px', // Compact padding
-                            }
-                          }}
-                        >
-                          <TableCell sx={{ whiteSpace: 'normal', maxWidth: '120px', lineHeight: '1.2', wordBreak: 'break-word' }}>
-                            {att.employee_name || att.employee_id}
-                          </TableCell>
-                          <TableCell sx={{ whiteSpace: 'nowrap' }}>{att.date}</TableCell>
-                          <TableCell sx={{ whiteSpace: 'nowrap' }}>
-                            {att.leave_type && (
-                              <Box sx={{ color: 'info.main', fontWeight: 500, fontSize: '0.8rem' }}>
-                                {att.leave_type}
-                              </Box>
-                            )}
-                            {att.stat_holiday_name && (
-                              <Box sx={{ color: 'warning.main', fontWeight: 500, fontSize: '0.8rem' }}>
-                                {att.stat_holiday_name}
-                              </Box>
-                            )}
-                            {!att.leave_type && !att.stat_holiday_name && '-'}
-                          </TableCell>
-                          <TableCell sx={{ fontSize: '0.8rem' }}>
-                            {hasTimeEdits && att.override_check_in ? (
-                              <Box>
-                                <Box sx={{ whiteSpace: 'nowrap' }}>{formatTime(effectiveCheckIn)}</Box>
-                                <Box sx={{ color: 'text.secondary', fontSize: '0.65rem', whiteSpace: 'nowrap' }}>was {formatTime(att.check_in)}</Box>
-                                {att.time_edit_reason && (
-                                  <Box sx={{ color: 'text.secondary', fontSize: '0.6rem', fontStyle: 'italic', mt: 0.25 }}>
-                                    {att.time_edit_reason}
-                                  </Box>
-                                )}
-                              </Box>
-                            ) : (
-                              formatTime(effectiveCheckIn)
-                            )}
-                          </TableCell>
-                          <TableCell sx={{ fontSize: '0.8rem' }}>
-                            {hasTimeEdits && att.override_check_out ? (
-                              <Box>
-                                <Box sx={{ whiteSpace: 'nowrap' }}>{formatTime(effectiveCheckOut)}</Box>
-                                <Box sx={{ color: 'text.secondary', fontSize: '0.65rem', whiteSpace: 'nowrap' }}>was {formatTime(att.check_out)}</Box>
-                              </Box>
-                            ) : (
-                              formatTime(effectiveCheckOut)
-                            )}
-                          </TableCell>
-                          <TableCell sx={{ whiteSpace: 'nowrap', fontSize: '0.8rem' }}>{formatTime(att.rounded_check_in)}</TableCell>
-                          <TableCell sx={{ whiteSpace: 'nowrap', fontSize: '0.8rem' }}>{formatTime(att.rounded_check_out)}</TableCell>
-                          <TableCell sx={{ textAlign: 'right' }}>
-                            {hasHoursEdits && att.override_regular_hours !== null && att.override_regular_hours !== undefined ? (
-                              <Box sx={{ textAlign: 'right' }}>
-                                <Box>{effectiveRegular.toFixed(2)}</Box>
-                                <Box sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>was {(att.regular_hours ?? 0.0).toFixed(2)}</Box>
-                                {att.hours_edit_reason && (
-                                  <Box sx={{ color: 'text.secondary', fontSize: '0.6rem', fontStyle: 'italic', mt: 0.25, textAlign: 'left' }}>
-                                    {att.hours_edit_reason}
-                                  </Box>
-                                )}
-                              </Box>
-                            ) : (
-                              effectiveRegular.toFixed(2)
-                            )}
-                          </TableCell>
-                          <TableCell sx={{ textAlign: 'right' }}>
-                            {hasHoursEdits && att.override_ot_hours !== null && att.override_ot_hours !== undefined ? (
-                              <Box sx={{ textAlign: 'right' }}>
-                                <Box>{effectiveOT.toFixed(2)}</Box>
-                                <Box sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>was {(att.ot_hours ?? 0.0).toFixed(2)}</Box>
-                                {att.hours_edit_reason && (
-                                  <Box sx={{ color: 'text.secondary', fontSize: '0.6rem', fontStyle: 'italic', mt: 0.25, textAlign: 'left' }}>
-                                    {att.hours_edit_reason}
-                                  </Box>
-                                )}
-                              </Box>
-                            ) : (
-                              effectiveOT.toFixed(2)
-                            )}
-                          </TableCell>
-                          <TableCell sx={{ textAlign: 'right' }}>
-                            {hasHoursEdits && att.override_weekend_ot_hours !== null && att.override_weekend_ot_hours !== undefined ? (
-                              <Box sx={{ textAlign: 'right' }}>
-                                <Box>{effectiveWeekendOT.toFixed(2)}</Box>
-                                <Box sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>was {(att.weekend_ot_hours ?? 0.0).toFixed(2)}</Box>
-                                {att.hours_edit_reason && (
-                                  <Box sx={{ color: 'text.secondary', fontSize: '0.6rem', fontStyle: 'italic', mt: 0.25, textAlign: 'left' }}>
-                                    {att.hours_edit_reason}
-                                  </Box>
-                                )}
-                              </Box>
-                            ) : (
-                              effectiveWeekendOT.toFixed(2)
-                            )}
-                          </TableCell>
-                          <TableCell sx={{ textAlign: 'right' }}>
-                            {hasHoursEdits && att.override_stat_holiday_hours !== null && att.override_stat_holiday_hours !== undefined ? (
-                              <Box sx={{ textAlign: 'right' }}>
-                                <Box>{effectiveStatHoliday.toFixed(2)}</Box>
-                                <Box sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>was {(att.stat_holiday_hours ?? 0.0).toFixed(2)}</Box>
-                                {att.hours_edit_reason && (
-                                  <Box sx={{ color: 'text.secondary', fontSize: '0.6rem', fontStyle: 'italic', mt: 0.25, textAlign: 'left' }}>
-                                    {att.hours_edit_reason}
-                                  </Box>
-                                )}
-                              </Box>
-                            ) : (
-                              effectiveStatHoliday.toFixed(2)
-                            )}
-                          </TableCell>
-                          <TableCell sx={{ padding: '4px !important' }}>
-                            <IconButton size="small" sx={{ padding: '4px' }} onClick={() => handleOpenDialog(att)}>
-                              <Edit fontSize="small" />
-                            </IconButton>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                    {selectedEmployeeId && attendance.length > 0 && (() => {
-                      // Calculate subtotals for single employee
-                      let calculatedRegular = 0;
-                      let calculatedOT = 0;
-                      let calculatedWeekendOT = 0;
-                      let calculatedStatHoliday = 0;
-                      attendance.forEach(a => {
-                        const effReg = (a.override_regular_hours !== null && a.override_regular_hours !== undefined) 
-                          ? a.override_regular_hours 
-                          : (a.regular_hours ?? 0.0);
-                        const effOT = (a.override_ot_hours !== null && a.override_ot_hours !== undefined) 
-                          ? a.override_ot_hours 
-                          : (a.ot_hours ?? 0.0);
-                        const effWeekendOT = (a.override_weekend_ot_hours !== null && a.override_weekend_ot_hours !== undefined) 
-                          ? a.override_weekend_ot_hours 
-                          : (a.weekend_ot_hours ?? 0.0);
-                        const effStatHoliday = (a.override_stat_holiday_hours !== null && a.override_stat_holiday_hours !== undefined) 
-                          ? a.override_stat_holiday_hours 
-                          : (a.stat_holiday_hours ?? 0.0);
-                        calculatedRegular += effReg;
-                        calculatedOT += effOT;
-                        calculatedWeekendOT += effWeekendOT;
-                        calculatedStatHoliday += effStatHoliday;
-                      });
-                      
-                      // Use override values if they exist, otherwise use calculated
-                      const totalRegular = periodOverride?.override_regular_hours !== null && periodOverride?.override_regular_hours !== undefined
-                        ? periodOverride.override_regular_hours
-                        : calculatedRegular;
-                      const totalOT = periodOverride?.override_ot_hours !== null && periodOverride?.override_ot_hours !== undefined
-                        ? periodOverride.override_ot_hours
-                        : calculatedOT;
-                      const totalWeekendOT = periodOverride?.override_weekend_ot_hours !== null && periodOverride?.override_weekend_ot_hours !== undefined
-                        ? periodOverride.override_weekend_ot_hours
-                        : calculatedWeekendOT;
-                      const totalStatHoliday = periodOverride?.override_stat_holiday_hours !== null && periodOverride?.override_stat_holiday_hours !== undefined
-                        ? periodOverride.override_stat_holiday_hours
-                        : calculatedStatHoliday;
-                      
-                      const hasOverride = periodOverride && (
-                        periodOverride.override_regular_hours !== null ||
-                        periodOverride.override_ot_hours !== null ||
-                        periodOverride.override_weekend_ot_hours !== null ||
-                        periodOverride.override_stat_holiday_hours !== null
-                      );
-                      
-                      return (
-                        <TableRow sx={{ backgroundColor: hasOverride ? '#fff3cd' : '#f5f5f5', fontWeight: 'bold' }}>
-                          <TableCell colSpan={7} sx={{ fontWeight: 'bold', textAlign: 'right', fontSize: '0.875rem' }}>
-                            {hasOverride ? 'Subtotal (Override):' : 'Subtotal:'}
-                          </TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', textAlign: 'right', fontSize: '0.875rem' }}>
-                            {hasOverride && totalRegular !== calculatedRegular ? (
-                              <Box>
-                                <Box>{totalRegular.toFixed(2)}</Box>
-                                <Box sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>was {calculatedRegular.toFixed(2)}</Box>
-                              </Box>
-                            ) : (
-                              totalRegular.toFixed(2)
-                            )}
-                          </TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', textAlign: 'right', fontSize: '0.875rem' }}>
-                            {hasOverride && totalOT !== calculatedOT ? (
-                              <Box>
-                                <Box>{totalOT.toFixed(2)}</Box>
-                                <Box sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>was {calculatedOT.toFixed(2)}</Box>
-                              </Box>
-                            ) : (
-                              totalOT.toFixed(2)
-                            )}
-                          </TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', textAlign: 'right', fontSize: '0.875rem' }}>
-                            {hasOverride && totalWeekendOT !== calculatedWeekendOT ? (
-                              <Box>
-                                <Box>{totalWeekendOT.toFixed(2)}</Box>
-                                <Box sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>was {calculatedWeekendOT.toFixed(2)}</Box>
-                              </Box>
-                            ) : (
-                              totalWeekendOT.toFixed(2)
-                            )}
-                          </TableCell>
-                          <TableCell sx={{ fontWeight: 'bold', textAlign: 'right', fontSize: '0.875rem' }}>
-                            {hasOverride && totalStatHoliday !== calculatedStatHoliday ? (
-                              <Box>
-                                <Box>{totalStatHoliday.toFixed(2)}</Box>
-                                <Box sx={{ color: 'text.secondary', fontSize: '0.65rem' }}>was {calculatedStatHoliday.toFixed(2)}</Box>
-                              </Box>
-                            ) : (
-                              totalStatHoliday.toFixed(2)
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <IconButton size="small" sx={{ padding: '4px' }} onClick={() => {
-                              setOverrideFormData({
-                                override_regular_hours: periodOverride?.override_regular_hours?.toString() || '',
-                                override_ot_hours: periodOverride?.override_ot_hours?.toString() || '',
-                                override_weekend_ot_hours: periodOverride?.override_weekend_ot_hours?.toString() || '',
-                                override_stat_holiday_hours: periodOverride?.override_stat_holiday_hours?.toString() || '',
-                                reason: periodOverride?.reason || '',
-                              });
-                              setOverrideDialogOpen(true);
-                            }}>
-                              <Edit fontSize="small" />
-                            </IconButton>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })()}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            )}
-          </Box>
-        )}
-
-        {tabValue === 1 && (
-          <Box sx={{ p: 2 }}>
-            <Typography variant="h6" gutterBottom>
-              Manual Entry
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Enter either check-in/check-out times OR hours directly (regular, OT, weekend OT, stat holiday). At least one is required.
-            </Typography>
-            
-            <Paper sx={{ p: 2, mb: 2 }}>
-              {/* Employee selector for manual entry */}
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6}>
-                  <Autocomplete
-                    options={filteredManualEntryEmployees}
-                    getOptionLabel={(option) => `${option.id} - ${option.full_name || `${option.first_name} ${option.last_name}`}`}
-                    value={manualEntryEmployee}
-                    onChange={(event, newValue) => {
-                      setManualEntryEmployee(newValue);
-                      setManualEntryEmployeeId(newValue?.id || '');
-                    }}
-                    onInputChange={(event, newInputValue) => {
-                      setManualEntrySearchTerm(newInputValue);
-                    }}
-                    inputValue={manualEntrySearchTerm}
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Employee *"
-                        placeholder="Enter employee ID or name"
-                        required
-                        InputLabelProps={{ shrink: true }}
-                      />
-                    )}
-                    renderOption={(props, option) => (
-                      <Box component="li" {...props}>
-                        <Box>
-                          <Typography variant="body1" fontWeight="bold">
-                            {option.id}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            {option.full_name || `${option.first_name} ${option.last_name}`}
-                          </Typography>
-                        </Box>
-                      </Box>
-                    )}
-                    noOptionsText="No employees found"
-                    disabled={!selectedCompanyId || employees.length === 0}
-                  />
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', height: '100%' }}>
-                    <Button
-                      variant="outlined"
-                      startIcon={<Add />}
-                      onClick={addManualEntryRow}
-                      disabled={!selectedCompanyId}
-                    >
-                      Add Row
-                    </Button>
-                    <Button
-                      variant="outlined"
-                      color="error"
-                      onClick={() => {
-                        setManualEntries([{ 
-                          id: '1', 
-                          date: '', 
-                          check_in: '', 
-                          check_out: '', 
-                          regular_hours: '', 
-                          ot_hours: '', 
-                          weekend_ot_hours: '', 
-                          stat_holiday_hours: '' 
-                        }]);
-                      }}
-                      disabled={manualEntries.length <= 1}
-                    >
-                      Clear All
-                    </Button>
-                  </Box>
-                </Grid>
-              </Grid>
-            </Paper>
-
-            {/* Manual entry table */}
-            <Paper sx={{ p: 2 }}>
-              <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 500, overflowX: 'auto' }}>
-                <Table size="small" stickyHeader sx={{ minWidth: 1000 }}>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell sx={{ minWidth: 130 }}>Date *</TableCell>
-                      <TableCell sx={{ minWidth: 120 }}>Check-In</TableCell>
-                      <TableCell sx={{ minWidth: 120 }}>Check-Out</TableCell>
-                      <TableCell sx={{ minWidth: 130 }}>Reg Hours</TableCell>
-                      <TableCell sx={{ minWidth: 130 }}>OT Hours</TableCell>
-                      <TableCell sx={{ minWidth: 140 }}>Weekend OT</TableCell>
-                      <TableCell sx={{ minWidth: 140 }}>Stat Holiday</TableCell>
-                      <TableCell align="center" sx={{ minWidth: 90 }}>Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {manualEntries.map((entry) => (
-                      <TableRow key={entry.id}>
-                        <TableCell>
-                          <TextField
-                            type="date"
-                            value={entry.date}
-                            onChange={(e) => updateManualEntry(entry.id, 'date', e.target.value)}
-                            InputLabelProps={{ shrink: true }}
-                            size="small"
-                            fullWidth
-                            required
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            type="time"
-                            value={entry.check_in}
-                            onChange={(e) => updateManualEntry(entry.id, 'check_in', e.target.value)}
-                            InputLabelProps={{ shrink: true }}
-                            size="small"
-                            fullWidth
-                            helperText={entry.check_in && !entry.check_out ? "Check-out required" : ""}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <TextField
-                            type="time"
-                            value={entry.check_out}
-                            onChange={(e) => updateManualEntry(entry.id, 'check_out', e.target.value)}
-                            InputLabelProps={{ shrink: true }}
-                            size="small"
-                            fullWidth
-                          />
-                        </TableCell>
-                        <TableCell sx={{ width: 130 }}>
-                          <TextField
-                            type="number"
-                            inputProps={{ step: 0.25, min: 0, style: { width: '100%' } }}
-                            value={entry.regular_hours || ''}
-                            onChange={(e) => updateManualEntry(entry.id, 'regular_hours', e.target.value)}
-                            InputLabelProps={{ shrink: true }}
-                            size="small"
-                            fullWidth
-                            placeholder="0.00"
-                            sx={{ '& .MuiInputBase-input': { width: '100%' } }}
-                          />
-                        </TableCell>
-                        <TableCell sx={{ width: 130 }}>
-                          <TextField
-                            type="number"
-                            inputProps={{ step: 0.25, min: 0, style: { width: '100%' } }}
-                            value={entry.ot_hours || ''}
-                            onChange={(e) => updateManualEntry(entry.id, 'ot_hours', e.target.value)}
-                            InputLabelProps={{ shrink: true }}
-                            size="small"
-                            fullWidth
-                            placeholder="0.00"
-                            sx={{ '& .MuiInputBase-input': { width: '100%' } }}
-                          />
-                        </TableCell>
-                        <TableCell sx={{ width: 140 }}>
-                          <TextField
-                            type="number"
-                            inputProps={{ step: 0.25, min: 0, style: { width: '100%' } }}
-                            value={entry.weekend_ot_hours || ''}
-                            onChange={(e) => updateManualEntry(entry.id, 'weekend_ot_hours', e.target.value)}
-                            InputLabelProps={{ shrink: true }}
-                            size="small"
-                            fullWidth
-                            placeholder="0.00"
-                            sx={{ '& .MuiInputBase-input': { width: '100%' } }}
-                          />
-                        </TableCell>
-                        <TableCell sx={{ width: 140 }}>
-                          <TextField
-                            type="number"
-                            inputProps={{ step: 0.25, min: 0, style: { width: '100%' } }}
-                            value={entry.stat_holiday_hours || ''}
-                            onChange={(e) => updateManualEntry(entry.id, 'stat_holiday_hours', e.target.value)}
-                            InputLabelProps={{ shrink: true }}
-                            size="small"
-                            fullWidth
-                            placeholder="0.00"
-                            sx={{ '& .MuiInputBase-input': { width: '100%' } }}
-                          />
-                        </TableCell>
-                        <TableCell align="center">
-                          <IconButton
-                            size="small"
-                            onClick={() => removeManualEntryRow(entry.id)}
-                            disabled={manualEntries.length === 1}
-                            color="error"
-                          >
-                            <Delete fontSize="small" />
-                          </IconButton>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-              
-              <Box sx={{ mt: 2, display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
-                <Button
-                  variant="outlined"
-                  onClick={() => {
-                    setManualEntries([{ 
-                      id: '1', 
-                      date: '', 
-                      check_in: '', 
-                      check_out: '', 
-                      regular_hours: '', 
-                      ot_hours: '', 
-                      weekend_ot_hours: '', 
-                      stat_holiday_hours: '' 
-                    }]);
-                    setManualEntryEmployee(null);
-                    setManualEntryEmployeeId('');
-                    setManualEntrySearchTerm('');
-                  }}
-                >
-                  Clear
-                </Button>
-                <Button
-                  variant="contained"
-                  onClick={async () => {
+  const handleManualSaveAll = async () => {
                     // Use the same save logic from handleSave
                     if (!manualEntryEmployeeId) {
                       setSnackbar({ open: true, message: 'Please select an employee', severity: 'error' });
@@ -2202,348 +1430,9 @@ const AttendancePage: React.FC = () => {
                     } finally {
                       setLoading(false);
                     }
-                  }}
-                  disabled={loading || !selectedCompanyId || !manualEntryEmployeeId || manualEntries.length === 0}
-                >
-                  Save All
-                </Button>
-              </Box>
-            </Paper>
-          </Box>
-        )}
+  };
 
-        {tabValue === 2 && (
-          <Box sx={{ p: 2 }}>
-            <Grid container spacing={2} mb={2}>
-              <Grid item xs={12} sm={2}>
-                <FormControl fullWidth disabled={!selectedCompanyId || payPeriods.length === 0}>
-                  <InputLabel>Pay Period</InputLabel>
-                  <Select
-                    value={reportPayPeriod ? `${reportPayPeriod.period_number}` : ''}
-                    onChange={(e) => {
-                      const periodNum = parseInt(e.target.value);
-                      const period = payPeriods.find(p => p.period_number === periodNum);
-                      setReportPayPeriod(period || null);
-                      if (period) {
-                        setReportFilters({ start_date: period.start_date, end_date: period.end_date });
-                      }
-                    }}
-                    label="Pay Period"
-                  >
-                    <MenuItem value="">None</MenuItem>
-                    {payPeriods.map((period) => (
-                      <MenuItem key={period.period_number} value={`${period.period_number}`}>
-                        Period {period.period_number} ({period.start_date} to {period.end_date})
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} sm={2}>
-                <FormControl fullWidth disabled={!selectedCompanyId || employees.length === 0}>
-                  <InputLabel>Employee</InputLabel>
-                  <Select
-                    value={reportEmployeeId}
-                    onChange={(e) => setReportEmployeeId(e.target.value)}
-                    label="Employee"
-                  >
-                    <MenuItem value="">All Employees</MenuItem>
-                    {employees.map((emp) => (
-                      <MenuItem key={emp.id} value={emp.id}>
-                        {emp.full_name || `${emp.first_name} ${emp.last_name}`}
-                      </MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} sm={2}>
-                <TextField
-                  fullWidth
-                  label="Start Date"
-                  type="date"
-                  value={reportFilters.start_date}
-                  onChange={(e) => {
-                    setReportFilters({ ...reportFilters, start_date: e.target.value });
-                    setReportPayPeriod(null); // Clear pay period when manually entering dates
-                  }}
-                  InputLabelProps={{ shrink: true }}
-                  disabled={!!reportPayPeriod}
-                />
-              </Grid>
-              <Grid item xs={12} sm={2}>
-                <TextField
-                  fullWidth
-                  label="End Date"
-                  type="date"
-                  value={reportFilters.end_date}
-                  onChange={(e) => {
-                    setReportFilters({ ...reportFilters, end_date: e.target.value });
-                    setReportPayPeriod(null); // Clear pay period when manually entering dates
-                  }}
-                  InputLabelProps={{ shrink: true }}
-                  disabled={!!reportPayPeriod}
-                />
-              </Grid>
-              <Grid item xs={12} sm={2}>
-                <Button 
-                  variant="contained" 
-                  onClick={loadReport}
-                  fullWidth
-                  sx={{ mb: 1 }}
-                >
-                  Generate Report
-                </Button>
-              </Grid>
-            </Grid>
-
-            <Grid container spacing={2} mb={2}>
-              <Grid item xs={12} sm={6}>
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Button
-                    variant={reportView === 'summary' ? 'contained' : 'outlined'}
-                    onClick={() => {
-                      setReportView('summary');
-                      setReport(null);
-                      setDetailedReport(null);
-                    }}
-                    sx={{ flex: 1 }}
-                  >
-                    Summary
-                  </Button>
-                  <Button
-                    variant={reportView === 'detailed' ? 'contained' : 'outlined'}
-                    onClick={() => {
-                      setReportView('detailed');
-                      setReport(null);
-                      setDetailedReport(null);
-                    }}
-                    sx={{ flex: 1 }}
-                  >
-                    Detailed
-                  </Button>
-                </Box>
-              </Grid>
-              <Grid item xs={12} sm={6}>
-                <Box sx={{ display: 'flex', gap: 1 }}>
-                  <Button
-                    variant="outlined"
-                    startIcon={<Print />}
-                    onClick={handlePrintReport}
-                    disabled={!report && !detailedReport}
-                    sx={{ flex: 1 }}
-                  >
-                    Print
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    startIcon={<FileDownload />}
-                    onClick={() => handleExportReport('excel')}
-                    disabled={!report && !detailedReport}
-                    sx={{ flex: 1 }}
-                  >
-                    Export Excel
-                  </Button>
-                </Box>
-              </Grid>
-            </Grid>
-
-            {report && reportView === 'summary' && (
-              <Box>
-                <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 2, mb: 1 }}>
-                  <Typography variant="h6">
-                    Time Attendance - {getAttendanceReportPeriodLabel(
-                      reportPayPeriod?.start_date || reportFilters.start_date,
-                      reportPayPeriod?.end_date || reportFilters.end_date,
-                      reportPayPeriod
-                    )}
-                  </Typography>
-                  <Typography variant="subtitle1">
-                    Total number of headcount: {getAttendanceReportHeadcount(report, null, 'summary')}
-                  </Typography>
-                </Box>
-                <Typography>
-                  Total Regular Hours: {report.total_regular_hours.toFixed(2)}
-                </Typography>
-                <Typography>
-                  Total OT Hours: {report.total_ot_hours.toFixed(2)}
-                </Typography>
-                <Typography>
-                  Total Weekend OT: {report.total_weekend_ot_hours.toFixed(2)}
-                </Typography>
-                <Typography>
-                  Total Stat Holiday Hours: {report.total_stat_holiday_hours.toFixed(2)}
-                </Typography>
-
-                <TableContainer sx={{ mt: 2 }}>
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Employee</TableCell>
-                        <TableCell>Regular Hours</TableCell>
-                        <TableCell>OT Hours</TableCell>
-                        <TableCell>Weekend OT</TableCell>
-                        <TableCell>Stat Holiday</TableCell>
-                        <TableCell>Days</TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {report.summary.map((item) => (
-                        <TableRow key={item.employee_id}>
-                          <TableCell>{item.employee_name}</TableCell>
-                          <TableCell>{item.total_regular_hours.toFixed(2)}</TableCell>
-                          <TableCell>{item.total_ot_hours.toFixed(2)}</TableCell>
-                          <TableCell>{item.total_weekend_ot_hours.toFixed(2)}</TableCell>
-                          <TableCell>{item.total_stat_holiday_hours.toFixed(2)}</TableCell>
-                          <TableCell>{item.total_days}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </TableContainer>
-              </Box>
-            )}
-
-            {detailedReport && reportView === 'detailed' && (() => {
-              const rowsWithSubtotals = buildDetailedRowsWithSubtotals(
-                detailedReport.details,
-                reportPeriodOverrides
-              );
-
-              return (
-                <Box>
-                  <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 2, mb: 1 }}>
-                    <Typography variant="h6">
-                      Time Attendance - {getAttendanceReportPeriodLabel(
-                        reportPayPeriod?.start_date || reportFilters.start_date,
-                        reportPayPeriod?.end_date || reportFilters.end_date,
-                        reportPayPeriod
-                      )}
-                    </Typography>
-                    <Typography variant="subtitle1">
-                      Total number of headcount: {getAttendanceReportHeadcount(null, detailedReport, 'detailed')}
-                    </Typography>
-                  </Box>
-                  <TableContainer sx={{ mt: 2 }}>
-                    <Table>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell>Employee</TableCell>
-                          <TableCell>Date</TableCell>
-                          <TableCell>Leave/Stat Holiday</TableCell>
-                          <TableCell>Start Time</TableCell>
-                          <TableCell>End Time</TableCell>
-                          <TableCell>Day</TableCell>
-                          <TableCell>Reg Hours</TableCell>
-                          <TableCell>OT Hours</TableCell>
-                          <TableCell>Weekend OT</TableCell>
-                          <TableCell>Stat Holiday</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
-                        {rowsWithSubtotals.map((item, index) => {
-                          if (item.type === 'detail' && item.row) {
-                            const row = item.row;
-                            return (
-                              <TableRow 
-                                key={`${row.employee_id}-${row.date}-${index}`}
-                                sx={{
-                                  backgroundColor: (row.day_type === 'Saturday' || row.day_type === 'Sunday')
-                                    ? 'rgba(0, 0, 0, 0.12)'
-                                    : 'transparent',
-                                }}
-                              >
-                                <TableCell>{row.employee_name}</TableCell>
-                                <TableCell>{row.date}</TableCell>
-                                <TableCell>
-                                  {row.leave_type && (
-                                    <Box sx={{ color: 'info.main', fontWeight: 500, fontSize: '0.8rem' }}>
-                                      {row.leave_type}
-                                    </Box>
-                                  )}
-                                  {row.stat_holiday_name && (
-                                    <Box sx={{ color: 'warning.main', fontWeight: 500, fontSize: '0.8rem' }}>
-                                      {row.stat_holiday_name}
-                                    </Box>
-                                  )}
-                                  {!row.leave_type && !row.stat_holiday_name && '-'}
-                                </TableCell>
-                                <TableCell>{row.check_in || '-'}</TableCell>
-                                <TableCell>{row.check_out || '-'}</TableCell>
-                                <TableCell>{row.day_type}</TableCell>
-                                <TableCell>{row.regular_hours.toFixed(2)}</TableCell>
-                                <TableCell>{row.ot_hours.toFixed(2)}</TableCell>
-                                <TableCell>{row.weekend_ot_hours.toFixed(2)}</TableCell>
-                                <TableCell>{(row.stat_holiday_hours || 0).toFixed(2)}</TableCell>
-                              </TableRow>
-                            );
-                          } else if (item.type === 'subtotal' && item.subtotal) {
-                            const subtotal = item.subtotal;
-                            return (
-                              <TableRow key={`subtotal-${subtotal.employee_id}-${index}`} sx={{ backgroundColor: '#f5f5f5', fontWeight: 'bold' }}>
-                                <TableCell colSpan={6} sx={{ fontWeight: 'bold', textAlign: 'right' }}>
-                                  Subtotal for {subtotal.employee_name} ({subtotal.employee_id}):
-                                </TableCell>
-                                <TableCell sx={{ fontWeight: 'bold' }}>{subtotal.regular_hours.toFixed(2)}</TableCell>
-                                <TableCell sx={{ fontWeight: 'bold' }}>{subtotal.ot_hours.toFixed(2)}</TableCell>
-                                <TableCell sx={{ fontWeight: 'bold' }}>{subtotal.weekend_ot_hours.toFixed(2)}</TableCell>
-                                <TableCell sx={{ fontWeight: 'bold' }}>{(subtotal.stat_holiday_hours || 0).toFixed(2)}</TableCell>
-                              </TableRow>
-                            );
-                          }
-                          return null;
-                        })}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </Box>
-              );
-            })()}
-          </Box>
-        )}
-      </Paper>
-
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Delete Attendance Records</DialogTitle>
-        <DialogContent>
-          <Alert severity="warning" sx={{ mb: 2 }}>
-            This action cannot be undone. All attendance records within the specified date range will be permanently deleted.
-          </Alert>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Start Date"
-                type="date"
-                value={deleteStartDate}
-                onChange={(e) => setDeleteStartDate(e.target.value)}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="End Date"
-                type="date"
-                value={deleteEndDate}
-                onChange={(e) => setDeleteEndDate(e.target.value)}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            {selectedEmployeeId && (
-              <Grid item xs={12}>
-                <Alert severity="info">
-                  Only records for employee {selectedEmployeeId} will be deleted (based on current filter).
-                </Alert>
-              </Grid>
-            )}
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-          <Button
-            variant="contained"
-            color="error"
-            onClick={async () => {
+  const handleDeleteByRange = async () => {
               if (!deleteStartDate || !deleteEndDate) {
                 setSnackbar({
                   open: true,
@@ -2589,235 +1478,9 @@ const AttendancePage: React.FC = () => {
               } finally {
                 setLoading(false);
               }
-            }}
-            disabled={!deleteStartDate || !deleteEndDate || loading}
-          >
-            Delete
-          </Button>
-        </DialogActions>
-      </Dialog>
+  };
 
-      <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="lg" fullWidth>
-        <DialogTitle>Edit Attendance</DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            {editingAttendance ? (
-              <>
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="Employee ID"
-                    value={formData.employee_id}
-                    onChange={(e) => setFormData({ ...formData, employee_id: e.target.value })}
-                    disabled
-                  />
-                </Grid>
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="Date"
-                    type="date"
-                    value={formData.date}
-                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    InputLabelProps={{ shrink: true }}
-                    disabled
-                  />
-                </Grid>
-              </>
-            ) : null}
-            
-            {editingAttendance ? (
-              <>
-                {/* Times Section */}
-                {(editingAttendance.check_in || editingAttendance.check_out) && (
-                  <>
-                    <Grid item xs={12}>
-                      <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>Check-In / Check-Out Times</Typography>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <TextField
-                        fullWidth
-                        label="Original Check-In"
-                        value={formatTime(formData.check_in)}
-                        disabled
-                        InputLabelProps={{ shrink: true }}
-                      />
-                    </Grid>
-                    <Grid item xs={6}>
-                      <TextField
-                        fullWidth
-                        label="Original Check-Out"
-                        value={formatTime(formData.check_out)}
-                        disabled
-                        InputLabelProps={{ shrink: true }}
-                      />
-                    </Grid>
-                  </>
-                )}
-                {editingAttendance.stat_holiday_name && !editingAttendance.check_in && !editingAttendance.check_out && (
-                  <Grid item xs={12}>
-                    <Typography variant="body2" sx={{ color: 'warning.main', fontStyle: 'italic', mt: 2 }}>
-                      Statutory Holiday: {editingAttendance.stat_holiday_name}
-                    </Typography>
-                  </Grid>
-                )}
-                {(editingAttendance.check_in || editingAttendance.check_out) && (
-                  <>
-                    <Grid item xs={6}>
-                      <TextField
-                        fullWidth
-                        label="Edited Check-In"
-                        type="time"
-                        value={formData.edited_check_in}
-                        onChange={(e) => setFormData({ ...formData, edited_check_in: e.target.value })}
-                        InputLabelProps={{ shrink: true }}
-                        helperText="Leave empty to use original"
-                      />
-                    </Grid>
-                    <Grid item xs={6}>
-                      <TextField
-                        fullWidth
-                        label="Edited Check-Out"
-                        type="time"
-                        value={formData.edited_check_out}
-                        onChange={(e) => setFormData({ ...formData, edited_check_out: e.target.value })}
-                        InputLabelProps={{ shrink: true }}
-                        helperText="Leave empty to use original"
-                      />
-                    </Grid>
-                    <Grid item xs={12}>
-                      <TextField
-                        fullWidth
-                        label="Reason for Time Edit"
-                        value={formData.time_edit_reason}
-                        onChange={(e) => setFormData({ ...formData, time_edit_reason: e.target.value })}
-                        multiline
-                        rows={2}
-                        placeholder="Enter reason for editing check-in/check-out times"
-                      />
-                    </Grid>
-                  </>
-                )}
-                
-                {/* Hours Section */}
-                <Grid item xs={12}>
-                  <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>Hours</Typography>
-                </Grid>
-                <Grid item xs={3}>
-                  <TextField
-                    fullWidth
-                    label="Original Regular"
-                    value={(editingAttendance.regular_hours ?? 0).toFixed(2)}
-                    disabled
-                    InputLabelProps={{ shrink: true }}
-                  />
-                </Grid>
-                <Grid item xs={3}>
-                  <TextField
-                    fullWidth
-                    label="Original OT"
-                    value={(editingAttendance.ot_hours ?? 0).toFixed(2)}
-                    disabled
-                    InputLabelProps={{ shrink: true }}
-                  />
-                </Grid>
-                <Grid item xs={3}>
-                  <TextField
-                    fullWidth
-                    label="Original Weekend OT"
-                    value={(editingAttendance.weekend_ot_hours ?? 0).toFixed(2)}
-                    disabled
-                    InputLabelProps={{ shrink: true }}
-                  />
-                </Grid>
-                <Grid item xs={3}>
-                  <TextField
-                    fullWidth
-                    label="Original Stat Holiday"
-                    value={(editingAttendance.stat_holiday_hours ?? 0).toFixed(2)}
-                    disabled
-                    InputLabelProps={{ shrink: true }}
-                  />
-                </Grid>
-                <Grid item xs={3}>
-                  <TextField
-                    fullWidth
-                    label="Edited Regular Hours"
-                    type="number"
-                    inputProps={{ step: 0.25, min: 0 }}
-                    value={formData.edited_regular_hours}
-                    onChange={(e) => setFormData({ ...formData, edited_regular_hours: e.target.value })}
-                    InputLabelProps={{ shrink: true }}
-                    helperText="Leave empty to use calculated"
-                  />
-                </Grid>
-                <Grid item xs={3}>
-                  <TextField
-                    fullWidth
-                    label="Edited OT Hours"
-                    type="number"
-                    inputProps={{ step: 0.25, min: 0 }}
-                    value={formData.edited_ot_hours}
-                    onChange={(e) => setFormData({ ...formData, edited_ot_hours: e.target.value })}
-                    InputLabelProps={{ shrink: true }}
-                    helperText="Leave empty to use calculated"
-                  />
-                </Grid>
-                <Grid item xs={3}>
-                  <TextField
-                    fullWidth
-                    label="Edited Weekend OT"
-                    type="number"
-                    inputProps={{ step: 0.25, min: 0 }}
-                    value={formData.edited_weekend_ot_hours}
-                    onChange={(e) => setFormData({ ...formData, edited_weekend_ot_hours: e.target.value })}
-                    InputLabelProps={{ shrink: true }}
-                    helperText="Leave empty to use calculated"
-                  />
-                </Grid>
-                <Grid item xs={3}>
-                  <TextField
-                    fullWidth
-                    label="Edited Stat Holiday"
-                    type="number"
-                    inputProps={{ step: 0.25, min: 0 }}
-                    value={formData.edited_stat_holiday_hours}
-                    onChange={(e) => setFormData({ ...formData, edited_stat_holiday_hours: e.target.value })}
-                    InputLabelProps={{ shrink: true }}
-                    helperText="Leave empty to use original"
-                  />
-                </Grid>
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="Reason for Hours Edit"
-                    value={formData.hours_edit_reason}
-                    onChange={(e) => setFormData({ ...formData, hours_edit_reason: e.target.value })}
-                    multiline
-                    rows={2}
-                    placeholder="Enter reason for editing hours"
-                  />
-                </Grid>
-                <Grid item xs={12}>
-                  <TextField
-                    fullWidth
-                    label="Remarks"
-                    value={formData.remarks}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      if (value.length <= 18) {
-                        setFormData({ ...formData, remarks: value });
-                      }
-                    }}
-                    inputProps={{ maxLength: 18 }}
-                    helperText={`${formData.remarks.length}/18 characters`}
-                    placeholder="Optional short remarks (max 18 characters)"
-                  />
-                </Grid>
-                <Grid item xs={12}>
-                  <Button
-                    variant="outlined"
-                    onClick={async () => {
+  const handleRecalculateEditing = async () => {
                       if (!editingAttendance) return;
                       try {
                         setLoading(true);
@@ -2884,202 +1547,9 @@ const AttendancePage: React.FC = () => {
                       } finally {
                         setLoading(false);
                       }
-                    }}
-                    disabled={loading}
-                    sx={{ mt: 1 }}
-                  >
-                    Recalculate Hours
-                  </Button>
-                </Grid>
-              </>
-            ) : (
-              <>
-                <Grid item xs={12}>
-                  <Alert severity="info">
-                    Manual entry is now available in the "Manual Entry" tab. Click the "Manual Entry" button above or switch to the "Manual Entry" tab to add new attendance records.
-                  </Alert>
-                </Grid>
-              </>
-            )}
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseDialog}>Cancel</Button>
-          <Button onClick={handleSave} variant="contained" disabled={loading}>Save</Button>
-        </DialogActions>
-      </Dialog>
+  };
 
-      <Dialog open={uploadDialogOpen} onClose={() => setUploadDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Upload Attendance CSV</DialogTitle>
-        <DialogContent>
-          <TextField
-            fullWidth
-            type="file"
-            inputProps={{ accept: '.csv' }}
-            onChange={(e: any) => setFile(e.target.files?.[0] || null)}
-            sx={{ mt: 2 }}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setUploadDialogOpen(false)}>Cancel</Button>
-          <Button onClick={handleUploadCSV} variant="contained" disabled={!file || loading}>
-            Upload
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={overrideDialogOpen} onClose={() => setOverrideDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Override Period Subtotals</DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            {selectedEmployeeId && selectedPayPeriod && (() => {
-              // Calculate current subtotals for display
-              let calculatedRegular = 0;
-              let calculatedOT = 0;
-              let calculatedWeekendOT = 0;
-              let calculatedStatHoliday = 0;
-              attendance.forEach(a => {
-                const effReg = (a.override_regular_hours !== null && a.override_regular_hours !== undefined) 
-                  ? a.override_regular_hours 
-                  : (a.regular_hours ?? 0.0);
-                const effOT = (a.override_ot_hours !== null && a.override_ot_hours !== undefined) 
-                  ? a.override_ot_hours 
-                  : (a.ot_hours ?? 0.0);
-                const effWeekendOT = (a.override_weekend_ot_hours !== null && a.override_weekend_ot_hours !== undefined) 
-                  ? a.override_weekend_ot_hours 
-                  : (a.weekend_ot_hours ?? 0.0);
-                const effStatHoliday = (a.override_stat_holiday_hours !== null && a.override_stat_holiday_hours !== undefined) 
-                  ? a.override_stat_holiday_hours 
-                  : (a.stat_holiday_hours ?? 0.0);
-                calculatedRegular += effReg;
-                calculatedOT += effOT;
-                calculatedWeekendOT += effWeekendOT;
-                calculatedStatHoliday += effStatHoliday;
-              });
-              
-              return (
-                <>
-                  <Grid item xs={12}>
-                    <Typography variant="body2" color="text.secondary">
-                      Employee: {attendance[0]?.employee_name || selectedEmployeeId}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Pay Period: {selectedPayPeriod.start_date} to {selectedPayPeriod.end_date}
-                    </Typography>
-                  </Grid>
-                  
-                  <Grid item xs={12}>
-                    <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>Calculated Values (Reference)</Typography>
-                  </Grid>
-                  <Grid item xs={3}>
-                    <TextField
-                      fullWidth
-                      label="Calculated Regular Hours"
-                      value={calculatedRegular.toFixed(2)}
-                      disabled
-                      InputLabelProps={{ shrink: true }}
-                    />
-                  </Grid>
-                  <Grid item xs={3}>
-                    <TextField
-                      fullWidth
-                      label="Calculated OT Hours"
-                      value={calculatedOT.toFixed(2)}
-                      disabled
-                      InputLabelProps={{ shrink: true }}
-                    />
-                  </Grid>
-                  <Grid item xs={3}>
-                    <TextField
-                      fullWidth
-                      label="Calculated Weekend OT"
-                      value={calculatedWeekendOT.toFixed(2)}
-                      disabled
-                      InputLabelProps={{ shrink: true }}
-                    />
-                  </Grid>
-                  <Grid item xs={3}>
-                    <TextField
-                      fullWidth
-                      label="Calculated Stat Holiday"
-                      value={calculatedStatHoliday.toFixed(2)}
-                      disabled
-                      InputLabelProps={{ shrink: true }}
-                    />
-                  </Grid>
-                  
-                  <Grid item xs={12}>
-                    <Typography variant="h6" sx={{ mt: 2, mb: 1 }}>Override Values</Typography>
-                  </Grid>
-                  <Grid item xs={3}>
-                    <TextField
-                      fullWidth
-                      label="Override Regular Hours"
-                      type="number"
-                      inputProps={{ step: 0.25, min: 0 }}
-                      value={overrideFormData.override_regular_hours}
-                      onChange={(e) => setOverrideFormData({ ...overrideFormData, override_regular_hours: e.target.value })}
-                      InputLabelProps={{ shrink: true }}
-                      helperText="Leave empty to use calculated"
-                    />
-                  </Grid>
-                  <Grid item xs={3}>
-                    <TextField
-                      fullWidth
-                      label="Override OT Hours"
-                      type="number"
-                      inputProps={{ step: 0.25, min: 0 }}
-                      value={overrideFormData.override_ot_hours}
-                      onChange={(e) => setOverrideFormData({ ...overrideFormData, override_ot_hours: e.target.value })}
-                      InputLabelProps={{ shrink: true }}
-                      helperText="Leave empty to use calculated"
-                    />
-                  </Grid>
-                  <Grid item xs={3}>
-                    <TextField
-                      fullWidth
-                      label="Override Weekend OT"
-                      type="number"
-                      inputProps={{ step: 0.25, min: 0 }}
-                      value={overrideFormData.override_weekend_ot_hours}
-                      onChange={(e) => setOverrideFormData({ ...overrideFormData, override_weekend_ot_hours: e.target.value })}
-                      InputLabelProps={{ shrink: true }}
-                      helperText="Leave empty to use calculated"
-                    />
-                  </Grid>
-                  <Grid item xs={3}>
-                    <TextField
-                      fullWidth
-                      label="Override Stat Holiday"
-                      type="number"
-                      inputProps={{ step: 0.25, min: 0 }}
-                      value={overrideFormData.override_stat_holiday_hours}
-                      onChange={(e) => setOverrideFormData({ ...overrideFormData, override_stat_holiday_hours: e.target.value })}
-                      InputLabelProps={{ shrink: true }}
-                      helperText="Leave empty to use calculated"
-                    />
-                  </Grid>
-                  <Grid item xs={12}>
-                    <TextField
-                      fullWidth
-                      label="Reason for Override"
-                      value={overrideFormData.reason}
-                      onChange={(e) => setOverrideFormData({ ...overrideFormData, reason: e.target.value })}
-                      multiline
-                      rows={3}
-                      placeholder="Enter reason for overriding subtotals"
-                    />
-                  </Grid>
-                </>
-              );
-            })()}
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOverrideDialogOpen(false)}>Cancel</Button>
-          {periodOverride && (
-            <Button
-              onClick={async () => {
+  const handleClearOverride = async () => {
                 try {
                   setLoading(true);
                   await attendanceAPI.deletePeriodOverride(periodOverride.id);
@@ -3092,15 +1562,9 @@ const AttendancePage: React.FC = () => {
                 } finally {
                   setLoading(false);
                 }
-              }}
-              color="error"
-              disabled={loading}
-            >
-              Clear Override
-            </Button>
-          )}
-          <Button
-            onClick={async () => {
+  };
+
+  const handleSaveOverride = async () => {
               try {
                 if (!selectedEmployeeId || !selectedPayPeriod || !selectedCompanyId) {
                   setSnackbar({ open: true, message: 'Missing required information', severity: 'error' });
@@ -3138,25 +1602,432 @@ const AttendancePage: React.FC = () => {
               } finally {
                 setLoading(false);
               }
-            }}
-            variant="contained"
-            disabled={loading}
-          >
-            Save
-          </Button>
-        </DialogActions>
-      </Dialog>
+  };
 
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
-      >
-        <Alert severity={snackbar.severity}>{snackbar.message}</Alert>
-      </Snackbar>
-    </Box>
+  const openOverrideDialog = () => {
+    setOverrideFormData({
+      override_regular_hours: periodOverride?.override_regular_hours?.toString() || '',
+      override_ot_hours: periodOverride?.override_ot_hours?.toString() || '',
+      override_weekend_ot_hours: periodOverride?.override_weekend_ot_hours?.toString() || '',
+      override_stat_holiday_hours: periodOverride?.override_stat_holiday_hours?.toString() || '',
+      reason: periodOverride?.reason || '',
+    });
+    setOverrideDialogOpen(true);
+  };
+
+  const handleReportPayPeriodChange = (periodNumber: string) => {
+    const periodNum = parseInt(periodNumber);
+    const period = payPeriods.find((p) => p.period_number === periodNum);
+    setReportPayPeriod(period || null);
+    if (period) {
+      setReportFilters({ start_date: period.start_date, end_date: period.end_date });
+    }
+  };
+
+  const handleReportViewChange = (view: 'summary' | 'detailed') => {
+    setReportView(view);
+    setReport(null);
+    setDetailedReport(null);
+  };
+
+  const resetManualEntryRows = () => setManualEntries([emptyManualEntry()]);
+
+  const openManualEntry = () => {
+    setTabValue(1);
+    if (manualEntries.length === 0) resetManualEntryRows();
+  };
+
+  const clearManualEntry = () => {
+    resetManualEntryRows();
+    setManualEntryEmployee(null);
+    setManualEntryEmployeeId('');
+    setManualEntrySearchTerm('');
+  };
+
+  const handlePayPeriodSelect = (value: string) => {
+    const periodNum = parseInt(value);
+    const period = payPeriods.find((p) => p.period_number === periodNum);
+    setSelectedPayPeriod(period || null);
+  };
+
+  const clearListFilters = () => {
+    setSelectedPayPeriod(null);
+    setSelectedEmployeeId('');
+  };
+
+  const hasCompany = !!selectedCompanyId;
+  const hasActiveFilters = !!selectedPayPeriod || !!selectedEmployeeId;
+  const totals = sumEffectiveHours(attendance);
+  const canRecalculate = !loading && (!!selectedPayPeriod || (!!recalcStartDate && !!recalcEndDate));
+
+  const overrideContext =
+    selectedEmployeeId && selectedPayPeriod
+      ? {
+          employeeLabel:
+            attendance.find((a) => a.employee_id === selectedEmployeeId)?.employee_name ||
+            employees.find((e) => e.id === selectedEmployeeId)?.full_name ||
+            selectedEmployeeId,
+          periodLabel: `Period ${selectedPayPeriod.period_number}: ${formatDate(selectedPayPeriod.start_date)} - ${formatDate(selectedPayPeriod.end_date)}`,
+          calculated: totals,
+        }
+      : null;
+
+  const reportTitle = getAttendanceReportPeriodLabel(
+    reportPayPeriod?.start_date || reportFilters.start_date,
+    reportPayPeriod?.end_date || reportFilters.end_date,
+    reportPayPeriod
+  );
+  const reportHeadcount = detailedReport
+    ? getAttendanceReportHeadcount(null, detailedReport, 'detailed')
+    : report
+      ? getAttendanceReportHeadcount(report, null, 'summary')
+      : '';
+  const detailedRows: DetailedRowWithSubtotal[] = detailedReport
+    ? buildDetailedRowsWithSubtotals(detailedReport.details, reportPeriodOverrides)
+    : [];
+
+  const companySelectorBar = !hasCompany ? (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-solid border-border bg-card px-4 py-3">
+      <Building2 className="size-4 text-muted-foreground" />
+      <span className="text-sm text-muted-foreground">
+        All Companies is selected. Pick a company to view and manage attendance.
+      </span>
+      <Select value="" onValueChange={(v) => setSelectedCompanyId(v)}>
+        <SelectTrigger className="ml-auto w-[260px]" aria-label="Company">
+          <SelectValue placeholder="Select company" />
+        </SelectTrigger>
+        <SelectContent>
+          {companies.map((c) => (
+            <SelectItem key={c.id} value={c.id}>
+              {c.trade_name || c.legal_name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  ) : null;
+
+  const renderListBody = () => {
+    if (!hasCompany) {
+      return (
+        <div className="flex flex-col items-center gap-2 px-6 py-16 text-center">
+          <Building2 className="size-8 text-muted-foreground" />
+          <p className="m-0 text-sm font-medium text-foreground">No company selected</p>
+          <p className="m-0 text-sm text-muted-foreground">
+            Select a company to view and manage attendance.
+          </p>
+        </div>
+      );
+    }
+    if (loading) {
+      return (
+        <div className="space-y-2 p-4">
+          <Skeleton className="h-9 w-full" />
+          {Array.from({ length: 8 }).map((_, i) => (
+            <Skeleton key={i} className="h-8 w-full" />
+          ))}
+        </div>
+      );
+    }
+    if (attendance.length === 0) {
+      return (
+        <div className="flex flex-col items-center gap-2 px-6 py-16 text-center">
+          <CalendarSearch className="size-8 text-muted-foreground" />
+          <p className="m-0 text-sm font-medium text-foreground">No attendance records found</p>
+          <p className="m-0 text-sm text-muted-foreground">
+            Try a different year, pay period or employee, or add records manually.
+          </p>
+          <Button className="mt-2" onClick={openManualEntry}>
+            <Plus className="size-4" /> Manual Entry
+          </Button>
+        </div>
+      );
+    }
+    return (
+      <AttendanceTable
+        attendance={attendance}
+        selectedEmployeeId={selectedEmployeeId}
+        periodOverride={periodOverride}
+        formatTime={formatTime}
+        onEdit={handleOpenDialog}
+        onEditSubtotal={openOverrideDialog}
+      />
+    );
+  };
+
+  return (
+    <div className="space-y-4 p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="m-0 text-2xl font-semibold tracking-tight text-foreground">
+            Attendance Management
+          </h1>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">
+            Review daily punch logs, rounded shift hours, overtime, and pay period reports
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setUploadDialogOpen(true)}>
+            <Upload className="size-4" /> Upload CSV
+          </Button>
+          <Button onClick={openManualEntry}>
+            <Plus className="size-4" /> Manual Entry
+          </Button>
+        </div>
+      </div>
+
+      {companySelectorBar}
+
+      <Tabs value={String(tabValue)} onValueChange={(v) => setTabValue(Number(v))} className="gap-4">
+        <TabsList
+          variant="line"
+          className="h-auto w-full justify-start gap-4 rounded-none border-0 border-b border-solid border-border p-0 group-data-[orientation=horizontal]/tabs:h-auto"
+        >
+          {['Attendance List', 'Manual Entry', 'Report'].map((label, i) => (
+            <TabsTrigger
+              key={label}
+              value={String(i)}
+              className="flex-none rounded-none px-1 py-2 after:bottom-[-1px]"
+            >
+              {label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        <TabsContent value="0" className="space-y-3">
+          <div className="rounded-lg border border-solid border-border bg-card p-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="grid gap-1.5">
+                <Label htmlFor="att-year" className="text-xs text-muted-foreground">Year</Label>
+                <Input
+                  id="att-year"
+                  type="number"
+                  className="w-24"
+                  value={selectedYear}
+                  onChange={(e) =>
+                    setSelectedYear(parseInt(e.target.value) || new Date().getFullYear())
+                  }
+                  disabled={!hasCompany}
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">Pay Period</Label>
+                <Select
+                  value={selectedPayPeriod ? `${selectedPayPeriod.period_number}` : ALL_VALUE}
+                  onValueChange={(v) => (v === ALL_VALUE ? setSelectedPayPeriod(null) : handlePayPeriodSelect(v))}
+                  disabled={!hasCompany || payPeriods.length === 0}
+                >
+                  <SelectTrigger className="w-[320px] tabular-nums" aria-label="Pay Period">
+                    <SelectValue placeholder="All Pay Periods" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_VALUE}>All Pay Periods</SelectItem>
+                    {payPeriods.map((p) => (
+                      <SelectItem key={p.period_number} value={`${p.period_number}`}>
+                        Period {p.period_number}: {formatDate(p.start_date)} - {formatDate(p.end_date)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs text-muted-foreground">Employee</Label>
+                <Select
+                  value={selectedEmployeeId || ALL_VALUE}
+                  onValueChange={(v) => setSelectedEmployeeId(v === ALL_VALUE ? '' : v)}
+                  disabled={!hasCompany || employees.length === 0}
+                >
+                  <SelectTrigger className="w-[220px]" aria-label="Employee">
+                    <SelectValue placeholder="All Employees" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_VALUE}>All Employees</SelectItem>
+                    {employees.map((emp) => (
+                      <SelectItem key={emp.id} value={emp.id}>
+                        {emp.full_name || `${emp.first_name} ${emp.last_name}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {hasActiveFilters && (
+                <Button variant="ghost" onClick={clearListFilters}>
+                  <FilterX className="size-4" /> Clear
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-auto"
+                aria-expanded={batchOpen}
+                onClick={() => setBatchOpen((o) => !o)}
+              >
+                <SlidersHorizontal className="size-4" /> Batch Actions
+                <ChevronDown className={cn('size-4 transition-transform', batchOpen && 'rotate-180')} />
+              </Button>
+            </div>
+
+            <Collapsible open={batchOpen} onOpenChange={setBatchOpen}>
+              <CollapsibleContent>
+                <div className="mt-3 flex flex-wrap items-end gap-3 rounded-md bg-muted/50 p-3">
+                  <span className="self-center text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Batch Tools
+                  </span>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="att-recalc-from" className="text-xs text-muted-foreground">Recalculate From</Label>
+                    <Input
+                      id="att-recalc-from"
+                      type="date"
+                      className="w-[160px]"
+                      value={recalcStartDate}
+                      onChange={(e) => setRecalcStartDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="att-recalc-to" className="text-xs text-muted-foreground">Recalculate To</Label>
+                    <Input
+                      id="att-recalc-to"
+                      type="date"
+                      className="w-[160px]"
+                      value={recalcEndDate}
+                      onChange={(e) => setRecalcEndDate(e.target.value)}
+                    />
+                  </div>
+                  <Button variant="secondary" onClick={handleRecalculateRange} disabled={!canRecalculate}>
+                    {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                    Recalculate Hours
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="ml-auto text-destructive hover:text-destructive"
+                    onClick={() => setDeleteDialogOpen(true)}
+                  >
+                    <Trash2 className="size-4" /> Delete by Date Range
+                  </Button>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
+
+          {hasCompany && attendance.length > 0 && !loading && (
+            <SummaryStrip
+              regular={totals.regular}
+              ot={totals.ot}
+              weekendOT={totals.weekendOT}
+              statHoliday={totals.statHoliday}
+            />
+          )}
+
+          <div className="overflow-hidden rounded-lg border border-solid border-border bg-card">
+            {renderListBody()}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="1">
+          <ManualEntryTab
+            companySelected={hasCompany}
+            loading={loading}
+            employeesCount={employees.length}
+            filteredEmployees={filteredManualEntryEmployees}
+            selectedEmployee={manualEntryEmployee}
+            searchTerm={manualEntrySearchTerm}
+            entries={manualEntries}
+            canSave={!loading && hasCompany && !!manualEntryEmployeeId && manualEntries.length > 0}
+            onSearchChange={setManualEntrySearchTerm}
+            onSelectEmployee={(emp) => {
+              setManualEntryEmployee(emp);
+              setManualEntryEmployeeId(emp?.id || '');
+            }}
+            onAddRow={addManualEntryRow}
+            onRemoveRow={removeManualEntryRow}
+            onUpdate={updateManualEntry}
+            onClearAll={resetManualEntryRows}
+            onClear={clearManualEntry}
+            onSaveAll={handleManualSaveAll}
+          />
+        </TabsContent>
+
+        <TabsContent value="2">
+          <AttendanceReportTab
+            companySelected={hasCompany}
+            payPeriods={payPeriods}
+            employees={employees}
+            reportPayPeriod={reportPayPeriod}
+            reportEmployeeId={reportEmployeeId}
+            reportFilters={reportFilters}
+            reportView={reportView}
+            report={report}
+            detailedReport={detailedReport}
+            title={reportTitle}
+            headcount={reportHeadcount}
+            rowsWithSubtotals={detailedRows}
+            onPayPeriodChange={handleReportPayPeriodChange}
+            onEmployeeChange={setReportEmployeeId}
+            onStartDateChange={(v) => setReportFilters((f) => ({ ...f, start_date: v }))}
+            onEndDateChange={(v) => setReportFilters((f) => ({ ...f, end_date: v }))}
+            onGenerate={loadReport}
+            onViewChange={handleReportViewChange}
+            onPrint={handlePrintReport}
+            onExport={() => handleExportReport('excel')}
+          />
+        </TabsContent>
+      </Tabs>
+
+      <EditAttendanceDialog
+        open={dialogOpen}
+        editingAttendance={editingAttendance}
+        formData={formData}
+        loading={loading}
+        formatTime={formatTime}
+        onChange={(patch) => setFormData((f) => ({ ...f, ...patch }))}
+        onClose={handleCloseDialog}
+        onSave={handleSave}
+        onRecalculate={handleRecalculateEditing}
+      />
+
+      <UploadCsvDialog
+        open={uploadDialogOpen}
+        file={file}
+        loading={loading}
+        onFileChange={setFile}
+        onUpload={handleUploadCSV}
+        onClose={() => {
+          setUploadDialogOpen(false);
+          setFile(null);
+        }}
+      />
+
+      <DeleteRangeDialog
+        open={deleteDialogOpen}
+        startDate={deleteStartDate}
+        endDate={deleteEndDate}
+        employeeId={selectedEmployeeId}
+        loading={loading}
+        onStartChange={setDeleteStartDate}
+        onEndChange={setDeleteEndDate}
+        onConfirm={handleDeleteByRange}
+        onClose={() => setDeleteDialogOpen(false)}
+      />
+
+      <OverrideSubtotalsDialog
+        open={overrideDialogOpen}
+        context={overrideContext}
+        formData={overrideFormData}
+        hasExisting={!!periodOverride}
+        loading={loading}
+        onChange={(patch) => setOverrideFormData((f) => ({ ...f, ...patch }))}
+        onClear={handleClearOverride}
+        onSave={handleSaveOverride}
+        onClose={() => setOverrideDialogOpen(false)}
+      />
+
+      <AppToast
+        message={snackbar.open ? snackbar.message : null}
+        variant={snackbar.severity}
+        onClose={closeToast}
+      />
+    </div>
   );
 };
 
 export default AttendancePage;
-

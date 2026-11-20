@@ -1,38 +1,75 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Box, Typography, Paper, Button, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, IconButton, Dialog, DialogTitle,
-  DialogContent, DialogActions, TextField, Grid, Alert, Snackbar,
-  CircularProgress, FormControl, InputLabel, Select, MenuItem, Autocomplete,
-} from '@mui/material';
-import { Add, Edit, Delete, PersonAdd, Visibility } from '@mui/icons-material';
+  Building2,
+  CalendarClock,
+  Eye,
+  Loader2,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  SearchX,
+  Trash2,
+  UserPlus,
+} from 'lucide-react';
 import { workScheduleAPI, employeeAPI } from '../api/client';
 import { useCompanyFilter } from '../contexts/CompanyFilterContext';
-import CompanyFilter from '../components/CompanyFilter';
-
-interface WorkSchedule {
-  id: number;
-  company_id: string;
-  name: string;
-  mon_start?: string;
-  mon_end?: string;
-  tue_start?: string;
-  tue_end?: string;
-  wed_start?: string;
-  wed_end?: string;
-  thu_start?: string;
-  thu_end?: string;
-  fri_start?: string;
-  fri_end?: string;
-  sat_start?: string;
-  sat_end?: string;
-  sun_start?: string;
-  sun_end?: string;
-  is_active: boolean;
-}
+import AppToast from '../components/AppToast';
+import ScheduleFormDialog from '../components/workschedule/ScheduleFormDialog';
+import ScheduleAssignDialog from '../components/workschedule/ScheduleAssignDialog';
+import {
+  EditAssignmentDialog,
+  ScheduleAssignmentsDialog,
+} from '../components/workschedule/ScheduleAssignmentsDialog';
+import {
+  DAYS,
+  DAY_SHORT,
+  formatTime,
+  getWeeklySummary,
+  type EmployeeAssignment,
+  type EmployeeOption,
+  type WorkSchedule,
+} from '../components/workschedule/scheduleTypes';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 
 const WorkSchedulePage: React.FC = () => {
-  const { selectedCompanyId, setSelectedCompanyId } = useCompanyFilter();
+  const { selectedCompanyId, setSelectedCompanyId, companies } = useCompanyFilter();
   const [schedules, setSchedules] = useState<WorkSchedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -45,12 +82,6 @@ const WorkSchedulePage: React.FC = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
   
   // Employee schedule assignment state
-  interface EmployeeOption {
-    id: string;
-    full_name: string;
-    first_name: string;
-    last_name: string;
-  }
   
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [assigningSchedule, setAssigningSchedule] = useState<WorkSchedule | null>(null);
@@ -62,15 +93,6 @@ const WorkSchedulePage: React.FC = () => {
   });
   
   // View assignments state
-  interface EmployeeAssignment {
-    id: number;
-    employee_id: string;
-    employee_name?: string;
-    employee_status?: string;
-    schedule_id: number;
-    effective_date: string;
-    end_date?: string;
-  }
   
   const [assignmentsDialogOpen, setAssignmentsDialogOpen] = useState(false);
   const [assignmentFilter, setAssignmentFilter] = useState<'active' | 'all'>('active');
@@ -82,9 +104,6 @@ const WorkSchedulePage: React.FC = () => {
     effective_date: '',
     end_date: '',
   });
-
-  const days = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
-  const dayLabels = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
   const loadSchedules = React.useCallback(async () => {
     // Only load schedules if a company is selected
@@ -164,7 +183,6 @@ const WorkSchedulePage: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('Are you sure you want to delete this schedule?')) return;
     try {
       await workScheduleAPI.delete(id);
       setSnackbar({ open: true, message: 'Schedule deleted successfully', severity: 'success' });
@@ -307,396 +325,348 @@ const WorkSchedulePage: React.FC = () => {
     }
   };
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '';
-    try {
-      // Extract YYYY-MM-DD from the string first to avoid timezone issues
-      const dateMatch = dateStr.match(/(\d{4}-\d{2}-\d{2})/);
-      if (dateMatch) {
-        const [year, month, day] = dateMatch[1].split('-').map(Number);
-        // Create date using local timezone to avoid shifts
-        const date = new Date(year, month - 1, day);
-        return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-      }
-      // Fallback to original parsing if no match
-      const date = new Date(dateStr);
-      return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
-    } catch {
-      return dateStr;
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [scheduleToDelete, setScheduleToDelete] = useState<WorkSchedule | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const closeToast = useCallback(() => setSnackbar((s) => ({ ...s, open: false })), []);
+
+  const filteredSchedules = schedules.filter((s) => {
+    if (statusFilter === 'active' && !s.is_active) return false;
+    if (statusFilter === 'inactive' && s.is_active) return false;
+    const q = search.trim().toLowerCase();
+    return !q || s.name.toLowerCase().includes(q);
+  });
+
+  const resetFilters = () => {
+    setSearch('');
+    setStatusFilter('all');
+  };
+
+  const confirmDelete = async () => {
+    if (!scheduleToDelete) return;
+    setDeleting(true);
+    await handleDelete(scheduleToDelete.id);
+    setDeleting(false);
+    setScheduleToDelete(null);
+  };
+
+  const iconAction = (label: string, icon: React.ReactNode, onClick: () => void) => (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-8" aria-label={label} onClick={onClick}>
+          {icon}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+
+  const headClass =
+    'h-10 bg-muted/40 px-3 text-xs font-medium tracking-wider text-muted-foreground uppercase';
+
+  const renderBody = () => {
+    if (!selectedCompanyId) {
+      return (
+        <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
+          <Building2 className="size-10 text-muted-foreground/60" aria-hidden="true" />
+          <p className="m-0 text-sm font-medium text-foreground">Select a company</p>
+          <p className="m-0 text-sm text-muted-foreground">
+            Choose a company above to view and manage schedules.
+          </p>
+        </div>
+      );
     }
-  };
-
-  const isActiveAssignment = (assignment: EmployeeAssignment) => {
-    if ((assignment.employee_status || '').toLowerCase() === 'terminated') return false;
-    if (!assignment.end_date) return true;
-    const today = new Date();
-    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    return assignment.end_date.slice(0, 10) >= todayKey;
-  };
-
-  const formatTime = (timeStr?: string) => {
-    if (!timeStr) return '-';
-    return timeStr.substring(0, 5); // HH:MM
-  };
-
-  if (loading) {
+    if (loading) {
+      return (
+        <div className="flex flex-col gap-2 p-4">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full" />
+          ))}
+        </div>
+      );
+    }
+    if (schedules.length === 0) {
+      return (
+        <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
+          <CalendarClock className="size-10 text-muted-foreground/60" aria-hidden="true" />
+          <p className="m-0 text-sm font-medium text-foreground">No schedules yet</p>
+          <p className="m-0 text-sm text-muted-foreground">
+            Create a weekly shift template for this company.
+          </p>
+          <Button size="sm" className="mt-2" onClick={() => handleOpenDialog()}>
+            <Plus />
+            Create Schedule
+          </Button>
+        </div>
+      );
+    }
+    if (filteredSchedules.length === 0) {
+      return (
+        <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
+          <SearchX className="size-10 text-muted-foreground/60" aria-hidden="true" />
+          <p className="m-0 text-sm font-medium text-foreground">No schedules match your filters</p>
+          <Button variant="outline" size="sm" className="mt-2" onClick={resetFilters}>
+            Reset filters
+          </Button>
+        </div>
+      );
+    }
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
-        <CircularProgress />
-      </Box>
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className={headClass}>Schedule Name</TableHead>
+            {DAY_SHORT.map((d) => (
+              <TableHead key={d} className={cn(headClass, 'text-center')}>
+                {d}
+              </TableHead>
+            ))}
+            <TableHead className={headClass}>Status</TableHead>
+            <TableHead className={cn(headClass, 'text-right')}>Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {filteredSchedules.map((schedule) => {
+            const summary = getWeeklySummary(schedule);
+            return (
+              <TableRow key={schedule.id}>
+                <TableCell className="px-3 py-3">
+                  <div className="flex flex-col">
+                    <span className="text-sm font-medium text-foreground">{schedule.name}</span>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {summary.days === 0
+                        ? 'No shifts'
+                        : `${summary.days} day${summary.days === 1 ? '' : 's'} \u2022 ${summary.hours}h/wk`}
+                    </span>
+                  </div>
+                </TableCell>
+                {DAYS.map((day, idx) => {
+                  const start = schedule[`${day}_start`];
+                  const end = schedule[`${day}_end`];
+                  return (
+                    <TableCell key={day} className="px-2 text-center" data-day={DAY_SHORT[idx]}>
+                      {start || end ? (
+                        <span className="inline-block rounded-md bg-secondary/70 px-2 py-1 text-xs font-medium whitespace-nowrap text-secondary-foreground tabular-nums">
+                          {formatTime(start)} - {formatTime(end)}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground/50" aria-label="Day off">
+                          {'\u2014'}
+                        </span>
+                      )}
+                    </TableCell>
+                  );
+                })}
+                <TableCell className="px-3">
+                  <Badge
+                    variant="secondary"
+                    className={cn(
+                      'rounded-md px-1.5 text-[11px] font-medium',
+                      schedule.is_active
+                        ? 'bg-event-union/15 text-event-union'
+                        : 'bg-muted text-muted-foreground',
+                    )}
+                  >
+                    {schedule.is_active ? 'Active' : 'Inactive'}
+                  </Badge>
+                </TableCell>
+                <TableCell className="px-3">
+                  <div className="flex items-center justify-end gap-0.5">
+                    {iconAction('View assignments', <Eye />, () => handleOpenAssignmentsDialog(schedule))}
+                    {iconAction('Assign employees', <UserPlus />, () => handleOpenAssignDialog(schedule))}
+                    {iconAction('Edit', <Pencil />, () => handleOpenDialog(schedule))}
+                    <DropdownMenu modal={false}>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="size-8"
+                          aria-label={`More actions for ${schedule.name}`}
+                        >
+                          <MoreHorizontal />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          variant="destructive"
+                          className="text-destructive focus:text-destructive"
+                          onSelect={() => setScheduleToDelete(schedule)}
+                        >
+                          <Trash2 className="text-destructive" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
     );
-  }
+  };
 
   return (
-    <Box sx={{ p: 3 }}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" component="h1">
-          Work Schedules
-        </Typography>
+    <div className="flex flex-col gap-5">
+      {/* Page header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="m-0 text-2xl font-semibold tracking-tight text-foreground">
+            Work Schedules
+          </h1>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">
+            Configure weekly shift templates and assign schedules to employees
+          </p>
+        </div>
         <Button
-          variant="contained"
-          startIcon={<Add />}
+          className="shrink-0"
           onClick={() => handleOpenDialog()}
           disabled={!selectedCompanyId}
         >
+          <Plus />
           Create Schedule
         </Button>
-      </Box>
+      </div>
 
-      {/* Company Filter */}
-      <Paper sx={{ p: 2, mb: 2 }}>
-        <Typography variant="h6" gutterBottom>
-          Select Company
-        </Typography>
-        <CompanyFilter
-          value={selectedCompanyId}
-          onChange={setSelectedCompanyId}
-          showAllOption={false}
-          label="Select Company"
-          size="small"
-        />
-      </Paper>
-
-      {!selectedCompanyId && (
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Please select a company above to view and manage schedules.
-        </Alert>
-      )}
-
-      <TableContainer component={Paper}>
-        <Table>
-          <TableHead>
-            <TableRow>
-              <TableCell>Name</TableCell>
-              <TableCell>Mon</TableCell>
-              <TableCell>Tue</TableCell>
-              <TableCell>Wed</TableCell>
-              <TableCell>Thu</TableCell>
-              <TableCell>Fri</TableCell>
-              <TableCell>Sat</TableCell>
-              <TableCell>Sun</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {schedules.map((schedule) => (
-              <TableRow key={schedule.id}>
-                <TableCell>{schedule.name}</TableCell>
-                <TableCell>{formatTime(schedule.mon_start)} - {formatTime(schedule.mon_end)}</TableCell>
-                <TableCell>{formatTime(schedule.tue_start)} - {formatTime(schedule.tue_end)}</TableCell>
-                <TableCell>{formatTime(schedule.wed_start)} - {formatTime(schedule.wed_end)}</TableCell>
-                <TableCell>{formatTime(schedule.thu_start)} - {formatTime(schedule.thu_end)}</TableCell>
-                <TableCell>{formatTime(schedule.fri_start)} - {formatTime(schedule.fri_end)}</TableCell>
-                <TableCell>{formatTime(schedule.sat_start)} - {formatTime(schedule.sat_end)}</TableCell>
-                <TableCell>{formatTime(schedule.sun_start)} - {formatTime(schedule.sun_end)}</TableCell>
-                <TableCell>{schedule.is_active ? 'Active' : 'Inactive'}</TableCell>
-                <TableCell>
-                  <IconButton 
-                    size="small" 
-                    onClick={() => handleOpenAssignmentsDialog(schedule)}
-                    title="View Assignments"
-                    color="info"
-                  >
-                    <Visibility />
-                  </IconButton>
-                  <IconButton 
-                    size="small" 
-                    onClick={() => handleOpenAssignDialog(schedule)}
-                    title="Assign to Employee"
-                    color="primary"
-                  >
-                    <PersonAdd />
-                  </IconButton>
-                  <IconButton size="small" onClick={() => handleOpenDialog(schedule)} title="Edit">
-                    <Edit />
-                  </IconButton>
-                  <IconButton size="small" onClick={() => handleDelete(schedule.id)} title="Delete">
-                    <Delete />
-                  </IconButton>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </TableContainer>
-
-      <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="md" fullWidth>
-        <DialogTitle>{editingSchedule ? 'Edit Schedule' : 'Create Schedule'}</DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Schedule Name"
-                value={formData.name || ''}
-                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              />
-            </Grid>
-            {days.map((day, idx) => (
-              <React.Fragment key={day}>
-                <Grid item xs={6}>
-                  <TextField
-                    fullWidth
-                    label={`${dayLabels[idx]} Start`}
-                    type="time"
-                    value={formData[`${day}_start` as keyof WorkSchedule] || ''}
-                    onChange={(e) => setFormData({ ...formData, [`${day}_start`]: e.target.value })}
-                    InputLabelProps={{ shrink: true }}
-                  />
-                </Grid>
-                <Grid item xs={6}>
-                  <TextField
-                    fullWidth
-                    label={`${dayLabels[idx]} End`}
-                    type="time"
-                    value={formData[`${day}_end` as keyof WorkSchedule] || ''}
-                    onChange={(e) => setFormData({ ...formData, [`${day}_end`]: e.target.value })}
-                    InputLabelProps={{ shrink: true }}
-                  />
-                </Grid>
-              </React.Fragment>
-            ))}
-            <Grid item xs={12}>
-              <FormControl fullWidth>
-                <InputLabel>Status</InputLabel>
-                <Select
-                  value={formData.is_active ? 'active' : 'inactive'}
-                  onChange={(e) => setFormData({ ...formData, is_active: e.target.value === 'active' })}
-                >
-                  <MenuItem value="active">Active</MenuItem>
-                  <MenuItem value="inactive">Inactive</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseDialog}>Cancel</Button>
-          <Button onClick={handleSave} variant="contained">Save</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* View Assignments Dialog */}
-      <Dialog open={assignmentsDialogOpen} onClose={handleCloseAssignmentsDialog} maxWidth="md" fullWidth>
-        <DialogTitle>
-          Employee Assignments: {viewingSchedule?.name || ''}
-        </DialogTitle>
-        <DialogContent>
-          <FormControl size="small" sx={{ mt: 1, mb: 2, minWidth: 220 }}>
-            <InputLabel>Show</InputLabel>
-            <Select
-              label="Show"
-              value={assignmentFilter}
-              onChange={(e) => setAssignmentFilter(e.target.value as 'active' | 'all')}
-            >
-              <MenuItem value="active">Active (exclude terminated)</MenuItem>
-              <MenuItem value="all">All assignments</MenuItem>
-            </Select>
-          </FormControl>
-          {assignmentsLoading ? (
-            <Box display="flex" justifyContent="center" p={3}>
-              <CircularProgress />
-            </Box>
-          ) : (() => {
-            const visibleAssignments = assignmentFilter === 'all'
-              ? scheduleAssignments
-              : scheduleAssignments.filter(isActiveAssignment);
-            if (visibleAssignments.length === 0) {
-              return (
-                <Alert severity="info" sx={{ mt: 2 }}>
-                  {scheduleAssignments.length === 0
-                    ? 'No employees assigned to this schedule.'
-                    : 'No active assignments. Switch to All assignments to see ended or terminated staff.'}
-                </Alert>
-              );
-            }
-            return (
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>Employee Name</TableCell>
-                    <TableCell>Employee ID</TableCell>
-                    <TableCell>Effective Date</TableCell>
-                    <TableCell>End Date</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {visibleAssignments.map((assignment) => (
-                    <TableRow key={assignment.id}>
-                      <TableCell>{assignment.employee_name || assignment.employee_id}</TableCell>
-                      <TableCell>{assignment.employee_id}</TableCell>
-                      <TableCell>{formatDate(assignment.effective_date)}</TableCell>
-                      <TableCell>{assignment.end_date ? formatDate(assignment.end_date) : 'Ongoing'}</TableCell>
-                      <TableCell>
-                        {assignment.end_date && new Date(assignment.end_date) < new Date() 
-                          ? 'Ended' 
-                          : assignment.end_date 
-                            ? 'Active (Scheduled End)' 
-                            : 'Active'}
-                      </TableCell>
-                      <TableCell>
-                        <IconButton 
-                          size="small" 
-                          onClick={() => handleOpenEditAssignment(assignment)}
-                          color="primary"
-                        >
-                          <Edit />
-                        </IconButton>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-            );
-          })()}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseAssignmentsDialog}>Close</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Edit Assignment Dialog */}
-      <Dialog open={!!editingAssignment} onClose={handleCloseEditAssignment} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          Edit Assignment: {editingAssignment?.employee_name || editingAssignment?.employee_id}
-        </DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Effective Date"
-                type="date"
-                value={editAssignmentFormData.effective_date}
-                onChange={(e) => setEditAssignmentFormData({ ...editAssignmentFormData, effective_date: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="End Date (Optional)"
-                type="date"
-                value={editAssignmentFormData.end_date}
-                onChange={(e) => setEditAssignmentFormData({ ...editAssignmentFormData, end_date: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-                helperText="Leave empty to make assignment ongoing, or set a date to deactivate"
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <Alert severity="info" sx={{ mt: 1 }}>
-                To deactivate this assignment, set an End Date. To make it ongoing again, clear the End Date.
-              </Alert>
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseEditAssignment}>Cancel</Button>
-          <Button 
-            onClick={handleUpdateAssignment} 
-            variant="contained"
-            disabled={!editAssignmentFormData.effective_date}
+      {/* Toolbar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-solid border-border bg-card p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={selectedCompanyId ?? ''}
+            onValueChange={(value) => setSelectedCompanyId(value)}
           >
-            Update Assignment
-          </Button>
-        </DialogActions>
-      </Dialog>
+            <SelectTrigger className="w-full sm:w-[280px]" aria-label="Select company">
+              <SelectValue placeholder="Select company" />
+            </SelectTrigger>
+            <SelectContent>
+              {companies.map((company) => (
+                <SelectItem key={company.id} value={company.id}>
+                  <Badge variant="outline" className="rounded-md px-1.5 text-[11px]">
+                    {company.id}
+                  </Badge>
+                  {company.legal_name || company.trade_name || company.id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
 
-      {/* Assign Schedule Dialog */}
-      <Dialog open={assignDialogOpen} onClose={handleCloseAssignDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          Assign Schedule: {assigningSchedule?.name || ''}
-        </DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12}>
-              <Autocomplete
-                options={employees}
-                getOptionLabel={(option) => option.full_name || `${option.first_name} ${option.last_name}`}
-                value={selectedEmployee}
-                onChange={(_, newValue) => setSelectedEmployee(newValue)}
-                renderInput={(params) => (
-                  <TextField
-                    {...params}
-                    label="Select Employee"
-                    placeholder="Search employee..."
-                    required
-                  />
-                )}
-                disabled={!selectedCompanyId || employees.length === 0}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Effective Date"
-                type="date"
-                value={assignmentFormData.effective_date}
-                onChange={(e) => setAssignmentFormData({ ...assignmentFormData, effective_date: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-                required
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="End Date (Optional)"
-                type="date"
-                value={assignmentFormData.end_date}
-                onChange={(e) => setAssignmentFormData({ ...assignmentFormData, end_date: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-                helperText="Leave empty for ongoing assignment"
-              />
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseAssignDialog}>Cancel</Button>
-          <Button 
-            onClick={handleAssignSchedule} 
-            variant="contained"
-            disabled={!selectedEmployee || !assignmentFormData.effective_date}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-full sm:w-64">
+            <Search
+              className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search schedules..."
+              aria-label="Search schedules"
+              className="pl-9"
+            />
+          </div>
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as 'all' | 'active' | 'inactive')}
           >
-            Assign Schedule
-          </Button>
-        </DialogActions>
-      </Dialog>
+            <SelectTrigger className="w-32" aria-label="Filter by status">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="inactive">Inactive</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
 
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
+      {/* Weekly schedule table */}
+      <div className="overflow-hidden rounded-lg border border-solid border-border bg-card text-card-foreground">
+        {renderBody()}
+      </div>
+
+      <ScheduleFormDialog
+        open={dialogOpen}
+        isEditing={!!editingSchedule}
+        formData={formData}
+        onChange={(patch) => setFormData((prev) => ({ ...prev, ...patch }))}
+        onClose={handleCloseDialog}
+        onSave={handleSave}
+      />
+
+      <ScheduleAssignmentsDialog
+        open={assignmentsDialogOpen}
+        schedule={viewingSchedule}
+        assignments={scheduleAssignments}
+        loading={assignmentsLoading}
+        filter={assignmentFilter}
+        onFilterChange={setAssignmentFilter}
+        onEdit={handleOpenEditAssignment}
+        onClose={handleCloseAssignmentsDialog}
+      />
+
+      <EditAssignmentDialog
+        assignment={editingAssignment}
+        formData={editAssignmentFormData}
+        onChange={(patch) => setEditAssignmentFormData((prev) => ({ ...prev, ...patch }))}
+        onClose={handleCloseEditAssignment}
+        onSave={handleUpdateAssignment}
+      />
+
+      <ScheduleAssignDialog
+        open={assignDialogOpen}
+        schedule={assigningSchedule}
+        employees={employees}
+        companySelected={!!selectedCompanyId}
+        selectedEmployee={selectedEmployee}
+        formData={assignmentFormData}
+        onSelectEmployee={setSelectedEmployee}
+        onFormChange={(patch) => setAssignmentFormData((prev) => ({ ...prev, ...patch }))}
+        onClose={handleCloseAssignDialog}
+        onSubmit={handleAssignSchedule}
+      />
+
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={!!scheduleToDelete}
+        onOpenChange={(open) => !open && !deleting && setScheduleToDelete(null)}
       >
-        <Alert severity={snackbar.severity}>{snackbar.message}</Alert>
-      </Snackbar>
-    </Box>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete schedule?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this schedule?
+              {scheduleToDelete ? ` "${scheduleToDelete.name}" will be removed.` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDelete();
+              }}
+            >
+              {deleting && <Loader2 className="animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AppToast
+        message={snackbar.open ? snackbar.message : null}
+        variant={snackbar.severity}
+        onClose={closeToast}
+      />
+    </div>
   );
 };
 
 export default WorkSchedulePage;
-

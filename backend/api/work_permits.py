@@ -2,11 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional
 from datetime import date, timedelta
 from api.dependencies import get_current_user, require_permission
-from schemas import WorkPermitCreate, WorkPermitUpdate, WorkPermitResponse
+from schemas import WorkPermitCreate, WorkPermitUpdate, WorkPermitResponse, WorkPermitCurrentResponse
 from repos.work_permit_repo import (
     create_work_permit, get_work_permit_by_id, get_work_permits_by_employee,
     get_current_work_permit, update_work_permit, delete_work_permit,
-    get_expiring_work_permits, search_work_permits
+    get_expiring_work_permits, search_work_permits, list_current_work_permits
 )
 from repos.employee_repo import get_employee
 
@@ -26,6 +26,21 @@ async def list_work_permits(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching work permits: {str(e)}")
 
+@router.get("/current", response_model=List[WorkPermitCurrentResponse])
+async def list_current_work_permits_endpoint(
+    company_id: Optional[str] = Query(None, description="Filter by the employee's current company"),
+    status: Optional[str] = Query(
+        None,
+        pattern="^(valid|expiring_soon|expired)$",
+        description="Filter by permit status: valid, expiring_soon or expired",
+    ),
+    current_user: dict = Depends(require_permission("work_permit:manage"))
+):
+    """Registry of all current (open) work permits with employee and company info."""
+    try:
+        return list_current_work_permits(company_id=company_id, status=status)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching current work permits: {str(e)}")
 @router.get("/employee/{employee_id}", response_model=List[WorkPermitResponse])
 async def get_work_permits_by_employee_id(
     employee_id: str,
@@ -100,6 +115,9 @@ async def create_work_permit_endpoint(
             permit_type=work_permit_data.permit_type,
             expiry_date=work_permit_data.expiry_date,
             renewed_date=work_permit_data.renewed_date,
+            permit_number=work_permit_data.permit_number,
+            issue_date=work_permit_data.issue_date,
+            notes=work_permit_data.notes,
             performed_by=current_user.get("username")
         )
         return permit
@@ -127,6 +145,12 @@ async def update_work_permit_endpoint(
             update_data["permit_type"] = work_permit_data.permit_type
         if work_permit_data.expiry_date is not None:
             update_data["expiry_date"] = work_permit_data.expiry_date
+        if work_permit_data.permit_number is not None:
+            update_data["permit_number"] = work_permit_data.permit_number
+        if work_permit_data.issue_date is not None:
+            update_data["issue_date"] = work_permit_data.issue_date
+        if work_permit_data.notes is not None:
+            update_data["notes"] = work_permit_data.notes
         if work_permit_data.renewed_date is not None and getattr(existing_permit, "status", None) == "renewed":
             update_data["renewed_date"] = work_permit_data.renewed_date
         

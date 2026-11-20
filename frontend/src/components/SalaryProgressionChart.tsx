@@ -1,22 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Box,
-  Typography,
-  Paper,
-  Card,
-  CardContent,
-  Grid,
-  Chip,
-  Alert,
-  CircularProgress,
-  Button,
-} from '@mui/material';
-import {
-  TrendingUp as TrendingUpIcon,
-  AttachMoney as MoneyIcon,
-  CalendarToday as CalendarIcon,
-  Assessment as AssessmentIcon,
-} from '@mui/icons-material';
+import { CalendarClock, ChartColumn, DollarSign, TrendingUp, TriangleAlert } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 import { salaryAPI } from '../api/client';
 
 interface SalaryProgressionData {
@@ -31,11 +19,26 @@ interface SalaryProgressionData {
 interface SalaryProgressionChartProps {
   employeeId: string;
   employeeName?: string;
+  /** Increment to reload the data (driven by the page-level Refresh button). */
+  refreshKey?: number;
 }
+
+// Parse YYYY-MM-DD as a local date so the displayed day never shifts with the time zone.
+const formatDisplayDate = (dateStr: string) => {
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString();
+};
+
+const PAY_TYPE_TINT: Record<string, string> = {
+  Hourly: 'bg-event-payroll/15 text-event-payroll',
+  Monthly: 'bg-event-holiday/15 text-event-holiday',
+  Annual: 'bg-event-union/15 text-event-union',
+};
 
 const SalaryProgressionChart: React.FC<SalaryProgressionChartProps> = ({
   employeeId,
   employeeName,
+  refreshKey = 0,
 }) => {
   const [progressionData, setProgressionData] = useState<SalaryProgressionData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -58,7 +61,7 @@ const SalaryProgressionChart: React.FC<SalaryProgressionChartProps> = ({
     if (employeeId) {
       loadProgressionData();
     }
-  }, [employeeId, loadProgressionData]);
+  }, [employeeId, loadProgressionData, refreshKey]);
 
   const calculateProgressionStats = () => {
     if (progressionData.length === 0) {
@@ -84,7 +87,7 @@ const SalaryProgressionChart: React.FC<SalaryProgressionChartProps> = ({
     for (let i = 1; i < sortedData.length; i++) {
       const current = sortedData[i];
       const previous = sortedData[i - 1];
-      
+
       const increase = current.pay_rate - previous.pay_rate;
       totalIncrease += increase;
       numberOfChanges++;
@@ -128,204 +131,184 @@ const SalaryProgressionChart: React.FC<SalaryProgressionChartProps> = ({
     }).format(amount);
   };
 
-
   const stats = calculateProgressionStats();
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" p={3}>
-        <CircularProgress />
-      </Box>
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 rounded-lg" />
+          ))}
+        </div>
+        <Skeleton className="h-64 rounded-lg" />
+      </div>
     );
   }
 
   if (error) {
     return (
-      <Alert severity="error" sx={{ mb: 2 }}>
-        {error}
+      <Alert variant="destructive">
+        <TriangleAlert />
+        <AlertDescription>{error}</AlertDescription>
       </Alert>
     );
   }
 
   if (progressionData.length === 0) {
     return (
-      <Alert severity="info">
-        No salary progression data available for this employee.
-      </Alert>
+      <div className="flex flex-col items-center gap-2 rounded-lg border border-solid border-border bg-card px-6 py-12 text-center">
+        <TrendingUp className="size-10 text-muted-foreground/60" aria-hidden="true" />
+        <p className="m-0 text-sm font-medium text-foreground">No progression data</p>
+        <p className="m-0 text-sm text-muted-foreground">
+          No salary progression data available for this employee.
+        </p>
+      </div>
     );
   }
 
+  const statCards = [
+    {
+      label: 'Current Salary',
+      value: stats.currentSalary ? formatCurrency(stats.currentSalary.pay_rate) : 'N/A',
+      icon: DollarSign,
+      iconClass: 'text-event-union',
+    },
+    {
+      label: 'Total Increase',
+      value: formatCurrency(stats.totalIncrease),
+      icon: TrendingUp,
+      iconClass: 'text-event-payroll',
+    },
+    {
+      label: 'Total Increase %',
+      value: `${stats.totalIncreasePercentage.toFixed(1)}%`,
+      icon: ChartColumn,
+      iconClass: 'text-event-holiday',
+    },
+    {
+      label: 'Salary Changes',
+      value: String(stats.numberOfChanges),
+      icon: CalendarClock,
+      iconClass: 'text-event-probation',
+    },
+  ];
+
+  const timeline = [...progressionData].sort(
+    (a, b) => new Date(a.effective_date).getTime() - new Date(b.effective_date).getTime()
+  );
+
   return (
-    <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h6">
-          Salary Progression - {employeeName || employeeId}
-        </Typography>
-        <Button
-          variant="outlined"
-          size="small"
-          onClick={loadProgressionData}
-          disabled={loading}
-        >
-          Refresh
-        </Button>
-      </Box>
+    <div className="flex flex-col gap-4">
+      <h3 className="m-0 text-sm font-semibold text-foreground">
+        Salary Progression - {employeeName || employeeId}
+      </h3>
 
-      {/* Statistics Cards */}
-      <Grid container spacing={2} mb={3}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" gap={1} mb={1}>
-                <MoneyIcon color="success" />
-                <Typography variant="h6" color="success.main">
-                  {stats.currentSalary ? formatCurrency(stats.currentSalary.pay_rate) : 'N/A'}
-                </Typography>
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                Current Salary
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
+      {/* Statistics cards */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {statCards.map(({ label, value, icon: Icon, iconClass }) => (
+          <div
+            key={label}
+            className="flex flex-col gap-2 rounded-lg border border-solid border-border bg-card p-4"
+          >
+            <span className="flex items-start justify-between gap-2">
+              <span className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                {label}
+              </span>
+              <Icon className={cn('size-4', iconClass)} aria-hidden="true" />
+            </span>
+            <span className="text-xl font-semibold text-foreground tabular-nums">{value}</span>
+          </div>
+        ))}
+      </div>
 
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" gap={1} mb={1}>
-                <TrendingUpIcon color="primary" />
-                <Typography variant="h6" color="primary.main">
-                  {formatCurrency(stats.totalIncrease)}
-                </Typography>
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                Total Increase
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" gap={1} mb={1}>
-                <AssessmentIcon color="secondary" />
-                <Typography variant="h6" color="secondary.main">
-                  {stats.totalIncreasePercentage.toFixed(1)}%
-                </Typography>
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                Total Increase %
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box display="flex" alignItems="center" gap={1} mb={1}>
-                <CalendarIcon color="info" />
-                <Typography variant="h6" color="info.main">
-                  {stats.numberOfChanges}
-                </Typography>
-              </Box>
-              <Typography variant="body2" color="text.secondary">
-                Salary Changes
-              </Typography>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Progression Timeline */}
-      <Paper sx={{ p: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Salary Timeline
-        </Typography>
-        
-        <Box>
-          {progressionData
-            .sort((a, b) => new Date(a.effective_date).getTime() - new Date(b.effective_date).getTime())
-            .map((record, index) => {
-              const isLast = index === progressionData.length - 1;
-              const nextRecord = progressionData[index + 1];
+      {/* Progression timeline */}
+      <Card className="gap-0 py-0">
+        <CardHeader className="px-5 py-3">
+          <CardTitle className="text-base">Salary Timeline</CardTitle>
+        </CardHeader>
+        <CardContent className="px-5 pb-5">
+          <ol className="m-0 list-none p-0">
+            {timeline.map((record, index) => {
+              const isLast = index === timeline.length - 1;
+              const nextRecord = timeline[index + 1];
               const increase = nextRecord ? nextRecord.pay_rate - record.pay_rate : 0;
               const increasePercentage = record.pay_rate > 0 ? (increase / record.pay_rate) * 100 : 0;
 
               return (
-                <Box key={record.effective_date} mb={2}>
-                  <Box display="flex" alignItems="center" gap={2}>
-                    <Box
-                      sx={{
-                        width: 12,
-                        height: 12,
-                        borderRadius: '50%',
-                        backgroundColor: isLast ? 'success.main' : 'primary.main',
-                        flexShrink: 0,
-                      }}
+                <li key={record.effective_date} className="m-0 flex gap-4 p-0">
+                  {/* dot + connector */}
+                  <div className="flex flex-col items-center">
+                    <span
+                      className={cn(
+                        'mt-1.5 size-3 shrink-0 rounded-full',
+                        isLast ? 'bg-event-union' : 'bg-primary',
+                      )}
                     />
-                    <Box flex={1}>
-                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-                        <Typography variant="h6">
-                          {formatCurrency(record.pay_rate)}
-                        </Typography>
-                        <Box display="flex" gap={1}>
-                          <Chip
-                            label={record.pay_type}
-                            size="small"
-                            color={record.pay_type === 'Hourly' ? 'primary' : record.pay_type === 'Monthly' ? 'secondary' : 'success'}
-                          />
-                          {isLast && (
-                            <Chip label="Current" color="success" size="small" />
+                    {!isLast && <span className="my-1 w-0.5 flex-1 bg-border" />}
+                  </div>
+
+                  <div className={cn('min-w-0 flex-1', !isLast && 'pb-5')}>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-lg font-semibold text-foreground tabular-nums">
+                        {formatCurrency(record.pay_rate)}
+                      </span>
+                      <div className="flex gap-1.5">
+                        <Badge
+                          variant="secondary"
+                          className={cn(
+                            'rounded-md text-[11px]',
+                            PAY_TYPE_TINT[record.pay_type] ?? 'bg-muted text-muted-foreground',
                           )}
-                        </Box>
-                      </Box>
-                      <Typography variant="body2" color="text.secondary" mb={1}>
-                        Effective: {new Date(record.effective_date).toLocaleDateString()}
-                        {record.end_date && (
-                          <> - {new Date(record.end_date).toLocaleDateString()}</>
+                        >
+                          {record.pay_type}
+                        </Badge>
+                        {isLast && (
+                          <Badge
+                            variant="secondary"
+                            className="rounded-md bg-event-union/15 text-[11px] text-event-union"
+                          >
+                            Current
+                          </Badge>
                         )}
-                      </Typography>
-                      {record.notes && (
-                        <Typography variant="body2" color="text.secondary" mb={1}>
-                          {record.notes}
-                        </Typography>
-                      )}
-                      {!isLast && nextRecord && (
-                        <Box display="flex" alignItems="center" gap={1} mt={1}>
-                          <Typography variant="body2" color="text.secondary">
-                            Next: {formatCurrency(nextRecord.pay_rate)} 
-                            ({increase >= 0 ? '+' : ''}{formatCurrency(increase)})
-                          </Typography>
-                          {increasePercentage !== 0 && (
-                            <Chip
-                              label={`${increasePercentage >= 0 ? '+' : ''}${increasePercentage.toFixed(1)}%`}
-                              size="small"
-                              color={increasePercentage > 0 ? 'success' : 'error'}
-                            />
-                          )}
-                        </Box>
-                      )}
-                    </Box>
-                  </Box>
-                  {!isLast && (
-                    <Box
-                      sx={{
-                        width: 2,
-                        height: 20,
-                        backgroundColor: 'divider',
-                        ml: 1.5,
-                        mt: 1,
-                      }}
-                    />
-                  )}
-                </Box>
+                      </div>
+                    </div>
+                    <p className="m-0 mt-0.5 text-sm text-muted-foreground tabular-nums">
+                      Effective: {formatDisplayDate(record.effective_date)}
+                      {record.end_date && <> - {formatDisplayDate(record.end_date)}</>}
+                    </p>
+                    {record.notes && (
+                      <p className="m-0 mt-1 text-sm text-muted-foreground">{record.notes}</p>
+                    )}
+                    {!isLast && nextRecord && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="text-sm text-muted-foreground tabular-nums">
+                          Next: {formatCurrency(nextRecord.pay_rate)} ({increase >= 0 ? '+' : ''}
+                          {formatCurrency(increase)})
+                        </span>
+                        {increasePercentage !== 0 && (
+                          <Badge
+                            variant="secondary"
+                            className={cn(
+                              'rounded-md text-[11px] tabular-nums',
+                              increasePercentage > 0
+                                ? 'bg-event-union/15 text-event-union'
+                                : 'bg-destructive/10 text-destructive',
+                            )}
+                          >
+                            {`${increasePercentage >= 0 ? '+' : ''}${increasePercentage.toFixed(1)}%`}
+                          </Badge>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </li>
               );
             })}
-        </Box>
-      </Paper>
-    </Box>
+          </ol>
+        </CardContent>
+      </Card>
+    </div>
   );
 };
 

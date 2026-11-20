@@ -305,6 +305,8 @@ export const workPermitAPI = {
   delete: (id: number) => apiClient.delete(`/work-permits/${id}`),
   getByEmployee: (employeeId: string) => apiClient.get(`/work-permits/employee/${employeeId}`),
   getCurrent: (employeeId: string) => apiClient.get(`/work-permits/employee/${employeeId}/current`),
+  listCurrent: (params?: { company_id?: string; status?: string }) =>
+    apiClient.get('/work-permits/current', { params }),
   getExpiring: (daysAhead?: number) => apiClient.get('/work-permits/expiring', { params: { days_ahead: daysAhead } }),
 };
 

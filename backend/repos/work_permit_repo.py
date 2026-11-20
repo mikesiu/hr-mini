@@ -38,6 +38,18 @@ def ensure_work_permit_schema() -> None:
             conn.execute(text(
                 "ALTER TABLE work_permits ADD COLUMN renewed_date DATE NULL"
             ))
+        if "permit_number" not in columns:
+            conn.execute(text(
+                "ALTER TABLE work_permits ADD COLUMN permit_number VARCHAR(100) NULL"
+            ))
+        if "issue_date" not in columns:
+            conn.execute(text(
+                "ALTER TABLE work_permits ADD COLUMN issue_date DATE NULL"
+            ))
+        if "notes" not in columns:
+            conn.execute(text(
+                "ALTER TABLE work_permits ADD COLUMN notes TEXT NULL"
+            ))
 
     _close_duplicate_active_permits()
     _schema_ready = True
@@ -97,6 +109,9 @@ def create_work_permit(
     expiry_date: date,
     *,
     renewed_date: date | None = None,
+    permit_number: str | None = None,
+    issue_date: date | None = None,
+    notes: str | None = None,
     performed_by: str | None = None,
 ) -> WorkPermit:
     ensure_work_permit_schema()
@@ -119,6 +134,9 @@ def create_work_permit(
             employee_id=employee_id,
             permit_type=permit_type,
             expiry_date=expiry_date,
+            permit_number=permit_number or None,
+            issue_date=issue_date,
+            notes=notes or None,
             status="active",
         )
         session.add(work_permit)
@@ -199,6 +217,10 @@ def update_work_permit(permit_id: int, *, performed_by: str | None = None, **kwa
             return None
 
         update_data = {k: v for k, v in kwargs.items() if v is not None and v != ""}
+        # Optional free-text fields can be cleared by sending an empty string
+        for clearable in ("permit_number", "notes"):
+            if kwargs.get(clearable) == "":
+                update_data[clearable] = None
         if not update_data:
             return work_permit
 
@@ -287,3 +309,101 @@ def search_work_permits(
 
         stmt = stmt.order_by(WorkPermit.expiry_date.desc())
         return session.execute(stmt).scalars().unique().all()
+
+
+EXPIRING_SOON_DAYS = 60
+
+
+def classify_permit(expiry_date: date, today: date | None = None) -> tuple[int, str]:
+    """Return (days_remaining, status) where status is expired / expiring_soon / valid."""
+    today = today or date.today()
+    days = (expiry_date - today).days
+    if days < 0:
+        return days, "expired"
+    if days <= EXPIRING_SOON_DAYS:
+        return days, "expiring_soon"
+    return days, "valid"
+
+
+def list_current_work_permits(company_id: str | None = None, status: str | None = None) -> list[dict]:
+    """
+    One row per employee: their current (open) work permit joined with basic employee
+    and company info. Terminated staff are excluded (same rule as get_expiring_work_permits).
+    Optional filters: company_id (employee's current/latest employment) and permit status
+    (valid / expiring_soon / expired).
+    """
+    # Imported here to avoid import cycles at module load
+    from repos.employment_repo import get_current_employment, get_latest_employment
+    from repos.company_repo import get_company_by_id
+
+    ensure_work_permit_schema()
+    today = date.today()
+    with SessionLocal() as session:
+        stmt = (
+            select(WorkPermit)
+            .join(Employee, Employee.id == WorkPermit.employee_id)
+            .outerjoin(Termination, Termination.employee_id == Employee.id)
+            .options(joinedload(WorkPermit.employee))
+            .where(or_(WorkPermit.status == "active", WorkPermit.status.is_(None)))
+            .where(Employee.status != "Terminated")
+            .where(
+                or_(
+                    Termination.id.is_(None),
+                    Termination.termination_effective_date > today,
+                )
+            )
+            .order_by(WorkPermit.expiry_date.asc())
+        )
+        permits = session.execute(stmt).scalars().unique().all()
+
+    # One current permit per employee (the newest open record wins)
+    latest: dict[str, WorkPermit] = {}
+    for permit in permits:
+        existing = latest.get(permit.employee_id)
+        if existing is None or (permit.id or 0) > (existing.id or 0):
+            latest[permit.employee_id] = permit
+
+    company_cache: dict[str, str | None] = {}
+    rows: list[dict] = []
+    for permit in latest.values():
+        employment = get_current_employment(permit.employee_id) or get_latest_employment(permit.employee_id)
+        emp_company_id = employment.company_id if employment else None
+        if company_id and emp_company_id != company_id:
+            continue
+
+        days_remaining, permit_status = classify_permit(permit.expiry_date, today)
+        if status and permit_status != status:
+            continue
+
+        company_name = None
+        if emp_company_id:
+            if emp_company_id not in company_cache:
+                company = get_company_by_id(emp_company_id)
+                company_cache[emp_company_id] = (
+                    (company.trade_name or company.legal_name) if company else None
+                )
+            company_name = company_cache[emp_company_id]
+
+        employee = permit.employee
+        rows.append({
+            "id": permit.id,
+            "employee_id": permit.employee_id,
+            "employee_code": permit.employee_id,
+            "full_name": employee.full_name if employee else permit.employee_id,
+            "first_name": employee.first_name if employee else None,
+            "last_name": employee.last_name if employee else None,
+            "company_id": emp_company_id,
+            "company_code": emp_company_id,
+            "company_name": company_name,
+            "permit_type": permit.permit_type,
+            "permit_number": permit.permit_number,
+            "issue_date": permit.issue_date,
+            "expiry_date": permit.expiry_date,
+            "status": permit.status or "active",
+            "notes": permit.notes,
+            "days_remaining": days_remaining,
+            "permit_status": permit_status,
+        })
+
+    rows.sort(key=lambda r: (r["expiry_date"], r["full_name"] or ""))
+    return rows

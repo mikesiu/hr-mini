@@ -1,144 +1,118 @@
-import React from 'react';
-import {
-  Box,
-  Typography,
-  Card,
-  CardContent,
-  CardActions,
-  Button,
-  Grid,
-  Chip,
-  useTheme,
-} from '@mui/material';
-import {
-  People as PeopleIcon,
-  Work as WorkIcon,
-  Event as EventIcon,
-  AttachMoney as MoneyIcon,
-  Assignment as AssignmentIcon,
-  Assessment as AssessmentIcon,
-} from '@mui/icons-material';
+import React, { useMemo, useState } from 'react';
+import { FileSearch, Search, X } from 'lucide-react';
 import { ReportType } from '../../types/reports';
+import { getReportIcon, groupReportTypes } from './reportCatalog';
+import { Input } from '@/components/ui/input';
+import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
 interface ReportSelectorProps {
   reportTypes: ReportType[];
   onSelectReport: (reportType: string) => void;
   selectedReportType?: string;
+  loading?: boolean;
 }
 
-const reportIcons: Record<string, React.ReactElement> = {
-  employee_directory: <PeopleIcon />,
-  employment_history: <WorkIcon />,
-  leave_balance: <EventIcon />,
-  salary_analysis: <MoneyIcon />,
-  work_permit_status: <AssignmentIcon />,
-  employee_personal_details: <AssessmentIcon />,
-  employee_basic_profile: <PeopleIcon />,
-};
-
-const reportColors: Record<string, string> = {
-  employee_directory: '#1976d2',
-  employment_history: '#388e3c',
-  leave_balance: '#f57c00',
-  salary_analysis: '#7b1fa2',
-  work_permit_status: '#d32f2f',
-  employee_personal_details: '#455a64',
-  employee_basic_profile: '#00897b',
-};
-
+/** Compact, searchable report catalog grouped by category. */
 export const ReportSelector: React.FC<ReportSelectorProps> = ({
   reportTypes,
   onSelectReport,
   selectedReportType,
+  loading = false,
 }) => {
-  const theme = useTheme();
+  const [query, setQuery] = useState('');
+
+  const groups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = q
+      ? reportTypes.filter(
+          (r) =>
+            r.name.toLowerCase().includes(q) ||
+            r.description.toLowerCase().includes(q) ||
+            r.type.toLowerCase().includes(q)
+        )
+      : reportTypes;
+    return groupReportTypes(filtered);
+  }, [reportTypes, query]);
 
   return (
-    <Box>
-      <Typography variant="h5" gutterBottom>
-        📊 HR Reports
-      </Typography>
-      <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-        Generate comprehensive reports across all HR operations with flexible filtering options.
-      </Typography>
+    <div className="overflow-hidden rounded-lg border border-solid border-border bg-card">
+      <div className="border-0 border-b border-solid border-border p-3">
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter reports..."
+            className="px-8"
+            aria-label="Filter reports"
+          />
+          {query && (
+            <button
+              type="button"
+              aria-label="Clear filter"
+              onClick={() => setQuery('')}
+              className="absolute top-1/2 right-2 flex size-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
+      </div>
 
-      <Grid container spacing={3}>
-        {reportTypes.map((report) => {
-          const isSelected = selectedReportType === report.type;
-          const icon = reportIcons[report.type] || <AssessmentIcon />;
-          const color = reportColors[report.type] || theme.palette.primary.main;
-
-          return (
-            <Grid item xs={12} sm={6} md={4} key={report.type}>
-              <Card
-                sx={{
-                  height: '100%',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s ease-in-out',
-                  border: isSelected ? `2px solid ${color}` : '1px solid transparent',
-                  '&:hover': {
-                    transform: 'translateY(-2px)',
-                    boxShadow: theme.shadows[3],
-                    border: `2px solid ${color}`,
-                  },
-                }}
-                onClick={() => onSelectReport(report.type)}
-              >
-                <CardContent sx={{ flexGrow: 1 }}>
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      mb: 2,
-                      color: color,
-                    }}
-                  >
-                    {icon}
-                    <Typography variant="h6" sx={{ ml: 1, fontWeight: 'bold' }}>
-                      {report.name}
-                    </Typography>
-                  </Box>
-                  
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    {report.description}
-                  </Typography>
-
-                  <Chip
-                    label={report.type.replace('_', ' ').toUpperCase()}
-                    size="small"
-                    sx={{
-                      backgroundColor: color,
-                      color: 'white',
-                      fontWeight: 'bold',
-                    }}
-                  />
-                </CardContent>
-
-                <CardActions>
-                  <Button
-                    size="small"
-                    variant={isSelected ? 'contained' : 'outlined'}
-                    sx={{
-                      backgroundColor: isSelected ? color : 'transparent',
-                      borderColor: color,
-                      color: isSelected ? 'white' : color,
-                      '&:hover': {
-                        backgroundColor: color,
-                        color: 'white',
-                      },
-                    }}
-                    fullWidth
-                  >
-                    {isSelected ? 'Selected' : 'Select Report'}
-                  </Button>
-                </CardActions>
-              </Card>
-            </Grid>
-          );
-        })}
-      </Grid>
-    </Box>
+      <nav aria-label="Report catalog" className="max-h-[calc(100vh-14rem)] overflow-y-auto p-2">
+        {loading ? (
+          <div className="space-y-2 p-1">
+            {Array.from({ length: 7 }).map((_, i) => (
+              <Skeleton key={i} className="h-12 w-full" />
+            ))}
+          </div>
+        ) : groups.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 px-4 py-10 text-center">
+            <FileSearch className="size-6 text-muted-foreground" />
+            <p className="m-0 text-sm font-medium text-foreground">No reports found</p>
+            <p className="m-0 text-xs text-muted-foreground">
+              {query ? 'Try a different search term.' : 'No reports are available.'}
+            </p>
+          </div>
+        ) : (
+          groups.map((group) => (
+            <div key={group.id} className="mb-2 last:mb-0">
+              <h3 className="m-0 px-2 pt-2 pb-1 text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+                {group.label}
+              </h3>
+              <ul className="m-0 list-none space-y-0.5 p-0">
+                {group.reports.map((report) => {
+                  const Icon = getReportIcon(report.type);
+                  const isSelected = selectedReportType === report.type;
+                  return (
+                    <li key={report.type}>
+                      <button
+                        type="button"
+                        aria-current={isSelected ? 'true' : undefined}
+                        onClick={() => onSelectReport(report.type)}
+                        className={cn(
+                          'flex w-full cursor-pointer items-start gap-2.5 rounded-md border-0 border-l-2 border-solid border-l-transparent bg-transparent px-2 py-2 text-left [font-family:inherit] text-foreground transition-colors outline-none hover:bg-accent/60 focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                          isSelected &&
+                            'border-l-primary bg-accent font-medium text-accent-foreground hover:bg-accent'
+                        )}
+                      >
+                        <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm">{report.name}</span>
+                          <span className="block truncate text-xs font-normal text-muted-foreground">
+                            {report.description}
+                          </span>
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))
+        )}
+      </nav>
+    </div>
   );
 };

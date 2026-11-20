@@ -15,7 +15,9 @@ from repos.user_repo import get_user_by_username
 # JWT Configuration
 SECRET_KEY = "your-secret-key-change-in-production"  # Fixed secret key for debugging
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+# Must exceed the frontend idle timeout (30 min) plus the frontend's token refresh
+# interval (10 min), otherwise the token can expire before the idle warning is shown.
+ACCESS_TOKEN_EXPIRE_MINUTES = 45
 
 security = HTTPBearer()
 

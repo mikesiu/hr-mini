@@ -1,18 +1,15 @@
 import React from 'react';
+import { Clock, TriangleAlert } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
-  DialogTitle,
   DialogContent,
-  DialogActions,
-  Button,
-  Typography,
-  Box,
-  Alert,
-} from '@mui/material';
-import {
-  AccessTime as TimeIcon,
-  Warning as WarningIcon,
-} from '@mui/icons-material';
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface SessionWarningDialogProps {
   open: boolean;
@@ -28,59 +25,39 @@ const SessionWarningDialog: React.FC<SessionWarningDialogProps> = ({
   timeRemaining,
 }) => {
   return (
-    <Dialog
-      open={open}
-      disableEscapeKeyDown
-      maxWidth="sm"
-      fullWidth
-      PaperProps={{
-        sx: {
-          borderRadius: 2,
-        },
-      }}
-    >
-      <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1, pb: 1 }}>
-        <WarningIcon color="warning" />
-        <Typography variant="h6" component="div">
-          Session Expiring Soon
-        </Typography>
-      </DialogTitle>
-      
-      <DialogContent sx={{ pt: 2 }}>
-        <Alert severity="warning" sx={{ mb: 2 }}>
-          Your session will expire in {timeRemaining} minute{timeRemaining !== 1 ? 's' : ''}.
-        </Alert>
-        
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-          <TimeIcon color="action" />
-          <Typography variant="body1">
+    <Dialog open={open}>
+      <DialogContent
+        showCloseButton={false}
+        className="sm:max-w-md"
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <TriangleAlert className="size-5 text-destructive" aria-hidden="true" />
+            Session Expiring Soon
+          </DialogTitle>
+          <DialogDescription className="flex items-center gap-2">
+            <Clock className="size-4 shrink-0" aria-hidden="true" />
             Would you like to extend your session for another 30 minutes?
-          </Typography>
-        </Box>
-        
-        <Typography variant="body2" color="text.secondary">
-          If you don't respond, you will be automatically logged out when your session expires.
-        </Typography>
+          </DialogDescription>
+        </DialogHeader>
+
+        <Alert variant="destructive">
+          <AlertDescription>
+            Your session will expire in {timeRemaining} minute{timeRemaining !== 1 ? 's' : ''}.
+            If you don&apos;t respond, you will be logged out automatically.
+          </AlertDescription>
+        </Alert>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onLogout}>
+            Logout Now
+          </Button>
+          <Button onClick={onExtend}>Extend Session</Button>
+        </DialogFooter>
       </DialogContent>
-      
-      <DialogActions sx={{ p: 3, pt: 1 }}>
-        <Button
-          onClick={onLogout}
-          variant="outlined"
-          color="inherit"
-          sx={{ minWidth: 100 }}
-        >
-          Logout Now
-        </Button>
-        <Button
-          onClick={onExtend}
-          variant="contained"
-          color="primary"
-          sx={{ minWidth: 100 }}
-        >
-          Extend Session
-        </Button>
-      </DialogActions>
     </Dialog>
   );
 };

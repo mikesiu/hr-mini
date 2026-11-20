@@ -1,312 +1,391 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Box,
-  Drawer,
-  AppBar,
-  Toolbar,
-  List,
-  Typography,
-  IconButton,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Menu,
-  MenuItem,
-  Alert,
-} from '@mui/material';
-import {
-  Menu as MenuIcon,
-  AccountCircle,
-  People,
-  Work,
-  Event,
-  AttachMoney,
-  Assignment,
+  Building2,
+  CalendarCheck,
+  CalendarClock,
+  CalendarDays,
+  CalendarRange,
+  ChevronDown,
+  ChevronRight,
+  ClipboardCheck,
+  Clock,
+  DollarSign,
+  IdCard,
+  Info,
+  KeyRound,
+  LayoutDashboard,
+  ListChecks,
+  LogOut,
   Receipt,
-  Business,
-  Person,
-  Assessment,
-  BarChart,
-  Dashboard as DashboardIcon,
-  CalendarToday,
-  PersonRemove,
-  Schedule,
-  AccessTime,
-  ListAlt,
-  InfoOutlined,
-} from '@mui/icons-material';
+  UserCog,
+  UserMinus,
+  Users,
+  Briefcase,
+  BarChart3,
+  type LucideIcon,
+} from 'lucide-react';
 import versionInfo from '../version.json';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyFilter } from '../contexts/CompanyFilterContext';
-import CompanyFilter from './CompanyFilter';
 import SessionManager from './SessionManager';
-import { useNavigate, useLocation } from 'react-router-dom';
-
-const drawerWidth = 240;
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarRail,
+  SidebarTrigger,
+  useSidebar,
+} from '@/components/ui/sidebar';
+import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
 interface AppLayoutProps {
   children: React.ReactNode;
 }
 
-const menuItems = [
-  { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard', permission: '', section: 'Overview' },
-  { text: 'Employee Information', icon: <People />, path: '/employees', permission: 'employee:view', section: 'Operations' },
-  { text: 'Employment Management', icon: <Work />, path: '/employment', permission: 'employment:view', section: 'Operations' },
-  { text: 'Salary Management', icon: <AttachMoney />, path: '/salary', permission: 'salary_history:view', section: 'Operations' },
-  { text: 'Leave Dashboard', icon: <Event />, path: '/leaves', permission: 'leave:manage', section: 'Operations' },
-  { text: 'Work Schedules', icon: <Schedule />, path: '/work-schedules', permission: 'schedule:view', section: 'Operations' },
-  { text: 'Attendance', icon: <AccessTime />, path: '/attendance', permission: 'attendance:view', section: 'Operations' },
-  { text: 'Work Permit Management', icon: <Assignment />, path: '/work-permits', permission: 'work_permit:manage', section: 'Operations' },
-  { text: 'Expense Reimbursement', icon: <Receipt />, path: '/expenses', permission: 'expense:manage', section: 'Operations' },
-  { text: 'Termination Management', icon: <PersonRemove />, path: '/terminations', permission: 'termination:view', section: 'Operations' },
-  { text: 'HR Reports', icon: <BarChart />, path: '/reports', permission: 'report:view', section: 'Reports & Analytics' },
-  { text: 'Company Management', icon: <Business />, path: '/companies', permission: 'company:manage', section: 'System Management' },
-  { text: 'Holiday Management', icon: <CalendarToday />, path: '/holidays', permission: 'holiday:view', section: 'System Management' },
-  { text: 'Payroll Periods', icon: <CalendarToday />, path: '/payroll-periods', permission: 'company:view', section: 'System Management' },
-  { text: 'User Management', icon: <Person />, path: '/users', permission: 'user:view', section: 'System Management' },
-  { text: 'Audit Report', icon: <Assessment />, path: '/audit', permission: 'audit:view', section: 'System Management' },
-  { text: 'Code Maintenance', icon: <ListAlt />, path: '/codes', permission: 'code:manage', section: 'System Management' },
-  { text: 'About', icon: <InfoOutlined />, path: '/about', permission: '', section: 'System Management' },
+interface NavItem {
+  text: string;
+  icon: LucideIcon;
+  path: string;
+  permission: string;
+}
+
+interface NavGroupConfig {
+  id: string;
+  label: string;
+  /** Overview is always visible; other groups can be collapsed */
+  collapsible: boolean;
+  /** Initial open state (a group containing the active route is always opened) */
+  defaultOpen: boolean;
+  items: NavItem[];
+}
+
+// All 18 routes, paths, permissions and icons are unchanged from the previous nav array.
+const navGroups: NavGroupConfig[] = [
+  {
+    id: 'overview',
+    label: 'Overview',
+    collapsible: false,
+    defaultOpen: true,
+    items: [
+      { text: 'Dashboard', icon: LayoutDashboard, path: '/dashboard', permission: '' },
+    ],
+  },
+  {
+    id: 'people',
+    label: 'People & Lifecycle',
+    collapsible: true,
+    defaultOpen: false,
+    items: [
+      { text: 'Employee Information', icon: Users, path: '/employees', permission: 'employee:view' },
+      { text: 'Employment Management', icon: Briefcase, path: '/employment', permission: 'employment:view' },
+      { text: 'Work Permit', icon: IdCard, path: '/work-permits', permission: 'work_permit:manage' },
+      { text: 'Termination Management', icon: UserMinus, path: '/terminations', permission: 'termination:view' },
+    ],
+  },
+  {
+    id: 'time-pay',
+    label: 'Time, Pay & Claims',
+    collapsible: true,
+    defaultOpen: false,
+    items: [
+      { text: 'Salary Management', icon: DollarSign, path: '/salary', permission: 'salary_history:view' },
+      { text: 'Leave Dashboard', icon: CalendarCheck, path: '/leaves', permission: 'leave:manage' },
+      { text: 'Work Schedules', icon: CalendarClock, path: '/work-schedules', permission: 'schedule:view' },
+      { text: 'Attendance', icon: Clock, path: '/attendance', permission: 'attendance:view' },
+      { text: 'Expense Reimbursement', icon: Receipt, path: '/expenses', permission: 'expense:manage' },
+    ],
+  },
+  {
+    id: 'reports',
+    label: 'Reports',
+    collapsible: true,
+    defaultOpen: false,
+    items: [
+      { text: 'HR Reports', icon: BarChart3, path: '/reports', permission: 'report:view' },
+      { text: 'Audit Report', icon: ClipboardCheck, path: '/audit', permission: 'audit:view' },
+    ],
+  },
+  {
+    id: 'admin',
+    label: 'Administration',
+    collapsible: true,
+    defaultOpen: false,
+    items: [
+      { text: 'Company Management', icon: Building2, path: '/companies', permission: 'company:manage' },
+      { text: 'Payroll Periods', icon: CalendarRange, path: '/payroll-periods', permission: 'company:view' },
+      { text: 'Holiday Management', icon: CalendarDays, path: '/holidays', permission: 'holiday:view' },
+      { text: 'User Management', icon: UserCog, path: '/users', permission: 'user:view' },
+      { text: 'Code Maintenance', icon: ListChecks, path: '/codes', permission: 'code:manage' },
+      { text: 'About', icon: Info, path: '/about', permission: '' },
+    ],
+  },
 ];
 
+const ALL_COMPANIES = 'all';
+
+const getInitials = (name: string) => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
+// shadcn's SidebarProvider persists its state in the `sidebar_state` cookie; restore it on load.
+const readSidebarOpen = (): boolean => {
+  const match = document.cookie.match(/(?:^|; )sidebar_state=([^;]*)/);
+  return match ? match[1] === 'true' : true;
+};
+
+interface NavGroupSectionProps {
+  group: NavGroupConfig;
+  pathname: string;
+}
+
+const NavGroupSection: React.FC<NavGroupSectionProps> = ({ group, pathname }) => {
+  const { state, isMobile } = useSidebar();
+  const hasActiveChild = group.items.some((item) => item.path === pathname);
+  const [open, setOpen] = useState(group.defaultOpen || hasActiveChild);
+
+  // Navigating to a route inside a collapsed group opens that group
+  useEffect(() => {
+    if (hasActiveChild) setOpen(true);
+  }, [hasActiveChild]);
+
+  // In the 56px icon rail there are no group headings, so every item must stay reachable
+  const iconRail = state === 'collapsed' && !isMobile;
+
+  const menu = (
+    <SidebarMenu>
+      {group.items.map((item) => {
+        const active = pathname === item.path;
+        const Icon = item.icon;
+        return (
+          <SidebarMenuItem key={item.path}>
+            <SidebarMenuButton asChild isActive={active} tooltip={item.text}>
+              <Link to={item.path} aria-current={active ? 'page' : undefined}>
+                <Icon />
+                <span>{item.text}</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        );
+      })}
+    </SidebarMenu>
+  );
+
+  if (!group.collapsible) {
+    return (
+      <SidebarGroup>
+        <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+        <SidebarGroupContent>{menu}</SidebarGroupContent>
+      </SidebarGroup>
+    );
+  }
+
+  return (
+    <Collapsible open={iconRail || open} onOpenChange={setOpen} className="group/collapsible">
+      <SidebarGroup>
+        <SidebarGroupLabel asChild>
+          <CollapsibleTrigger
+            tabIndex={iconRail ? -1 : 0}
+            className="w-full cursor-pointer border-0 bg-transparent text-left [font-family:inherit] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+          >
+            {group.label}
+            <ChevronRight className="ml-auto size-4 transition-transform duration-200 group-data-[state=open]/collapsible:rotate-90" />
+          </CollapsibleTrigger>
+        </SidebarGroupLabel>
+        <CollapsibleContent>
+          <SidebarGroupContent>{menu}</SidebarGroupContent>
+        </CollapsibleContent>
+      </SidebarGroup>
+    </Collapsible>
+  );
+};
+
 export const AppLayout: React.FC<AppLayoutProps> = ({ children }) => {
-  const [mobileOpen, setMobileOpen] = useState(false);
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  
   const { user, logout, hasPermission } = useAuth();
-  const { selectedCompanyId, setSelectedCompanyId, selectedCompany } = useCompanyFilter();
+  const { selectedCompanyId, setSelectedCompanyId, selectedCompany, companies, loading: companiesLoading } = useCompanyFilter();
   const navigate = useNavigate();
   const location = useLocation();
+  const [defaultOpen] = useState(readSidebarOpen);
 
-  const handleDrawerToggle = () => {
-    setMobileOpen(!mobileOpen);
-  };
-
-  const handleMenu = (event: React.MouseEvent<HTMLElement>) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleClose = () => {
-    setAnchorEl(null);
-  };
+  const displayName = user?.display_name || user?.username || '';
 
   const handleLogout = () => {
     logout();
-    handleClose();
   };
 
   const handleChangePassword = () => {
     navigate('/change-password');
-    handleClose();
   };
 
-  // Filter menu items based on permissions
-  const accessibleItems = menuItems.filter(item => !item.permission || hasPermission(item.permission));
-  
-  // Group items by section
-  const groupedItems = accessibleItems.reduce((acc, item) => {
-    if (!acc[item.section]) {
-      acc[item.section] = [];
-    }
-    acc[item.section].push(item);
-    return acc;
-  }, {} as Record<string, typeof menuItems>);
-
-  const drawer = (
-    <div>
-      <Toolbar
-        sx={{
-          borderBottom: '1px solid',
-          borderColor: 'divider',
-          minHeight: '64px !important',
-        }}
-      >
-        <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 600 }}>
-          HR Mini
-        </Typography>
-        <Typography
-          variant="caption"
-          color="text.secondary"
-          sx={{ ml: 1, mt: 0.5, cursor: 'pointer' }}
-          onClick={() => navigate('/about')}
-        >
-          v{versionInfo.version}
-        </Typography>
-      </Toolbar>
-      
-      {/* Company Filter */}
-      <Box sx={{ p: 2, borderBottom: '1px solid', borderColor: 'divider' }}>
-        <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5, fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          🏢 Company Filter
-        </Typography>
-        <CompanyFilter
-          value={selectedCompanyId}
-          onChange={setSelectedCompanyId}
-          showAllOption={true}
-          label="Filter by Company"
-          size="small"
-        />
-        {selectedCompany && (
-          <Box sx={{ mt: 1.5 }}>
-            <Alert severity="info" icon={<Business />} sx={{ py: 0.5 }}>
-              <Typography variant="caption">
-                <strong>Selected:</strong> {selectedCompany.legal_name}
-                {selectedCompany.trade_name && ` (${selectedCompany.trade_name})`}
-              </Typography>
-            </Alert>
-          </Box>
-        )}
-        {!selectedCompanyId && (
-          <Box sx={{ mt: 1.5 }}>
-            <Alert severity="success" sx={{ py: 0.5 }}>
-              <Typography variant="caption">
-                <strong>All Companies</strong> - Showing data from all companies
-              </Typography>
-            </Alert>
-          </Box>
-        )}
-      </Box>
-      
-      {/* Navigation Menu */}
-      {Object.entries(groupedItems).map(([section, items]) => (
-        <div key={section}>
-          <Box sx={{ px: 2, py: 1.5, borderBottom: '1px solid', borderColor: 'divider' }}>
-            <Typography variant="subtitle2" color="text.secondary" sx={{ fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              {section}
-            </Typography>
-          </Box>
-          <List sx={{ py: 0.5 }}>
-            {items.map((item) => (
-              <ListItem key={item.text} disablePadding>
-                <ListItemButton
-                  selected={location.pathname === item.path}
-                  onClick={() => navigate(item.path)}
-                >
-                  <ListItemIcon sx={{ minWidth: 40, color: location.pathname === item.path ? 'primary.main' : 'text.secondary' }}>
-                    {item.icon}
-                  </ListItemIcon>
-                  <ListItemText 
-                    primary={item.text}
-                    primaryTypographyProps={{
-                      fontSize: '0.9375rem',
-                      fontWeight: location.pathname === item.path ? 500 : 400,
-                    }}
-                  />
-                </ListItemButton>
-              </ListItem>
-            ))}
-          </List>
-        </div>
-      ))}
-    </div>
-  );
+  // Filter menu items based on permissions; hide groups that end up empty
+  const accessibleGroups = navGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => !item.permission || hasPermission(item.permission)),
+    }))
+    .filter((group) => group.items.length > 0);
 
   return (
-    <Box sx={{ display: 'flex' }}>
-      <AppBar
-        position="fixed"
-        sx={{
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
-          ml: { sm: `${drawerWidth}px` },
-        }}
-      >
-        <Toolbar>
-          <IconButton
-            color="inherit"
-            aria-label="open drawer"
-            edge="start"
-            onClick={handleDrawerToggle}
-            sx={{ mr: 2, display: { sm: 'none' }, color: 'text.primary' }}
-          >
-            <MenuIcon />
-          </IconButton>
-          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1, fontWeight: 600 }}>
-            HR Management System
-          </Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center' }}>
-            <Typography variant="body2" sx={{ mr: 2, color: 'text.secondary', fontWeight: 500 }}>
-              {user?.display_name || user?.username}
-            </Typography>
-            <IconButton
-              size="large"
-              aria-label="account of current user"
-              aria-controls="menu-appbar"
-              aria-haspopup="true"
-              onClick={handleMenu}
-              sx={{ color: 'text.primary' }}
+    <SidebarProvider defaultOpen={defaultOpen}>
+      <Sidebar collapsible="icon">
+        <SidebarHeader>
+          <div className="flex h-10 items-center gap-2 px-1 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+            <div
+              className="flex size-8 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-xs font-bold tracking-tight text-sidebar-primary-foreground"
+              aria-hidden="true"
             >
-              <AccountCircle />
-            </IconButton>
-        <Menu
-          id="menu-appbar"
-          anchorEl={anchorEl}
-          anchorOrigin={{
-            vertical: 'top',
-            horizontal: 'right',
-          }}
-          keepMounted
-          transformOrigin={{
-            vertical: 'top',
-            horizontal: 'right',
-          }}
-          open={Boolean(anchorEl)}
-          onClose={handleClose}
-        >
-          <MenuItem onClick={handleChangePassword}>Change My Password</MenuItem>
-          <MenuItem onClick={() => { navigate('/about'); handleClose(); }}>About</MenuItem>
-          <MenuItem onClick={handleLogout}>Logout</MenuItem>
-        </Menu>
-          </Box>
-        </Toolbar>
-      </AppBar>
-      
-      <Box
-        component="nav"
-        sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
-        aria-label="mailbox folders"
-      >
-        <Drawer
-          variant="temporary"
-          open={mobileOpen}
-          onClose={handleDrawerToggle}
-          ModalProps={{
-            keepMounted: true,
-          }}
-          sx={{
-            display: { xs: 'block', sm: 'none' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
-          }}
-        >
-          {drawer}
-        </Drawer>
-        <Drawer
-          variant="permanent"
-          sx={{
-            display: { xs: 'none', sm: 'block' },
-            '& .MuiDrawer-paper': { boxSizing: 'border-box', width: drawerWidth },
-          }}
-          open
-        >
-          {drawer}
-        </Drawer>
-      </Box>
-      
-      <Box
-        component="main"
-        sx={{
-          flexGrow: 1,
-          p: 3,
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
-          backgroundColor: 'background.default',
-          minHeight: '100vh',
-        }}
-      >
-        <Toolbar />
-        <SessionManager>
-          {children}
-        </SessionManager>
-      </Box>
-    </Box>
+              HR
+            </div>
+            <div className="flex min-w-0 items-center gap-2 group-data-[collapsible=icon]:hidden">
+              <span className="truncate text-base font-semibold tracking-tight text-sidebar-foreground">
+                HR Mini
+              </span>
+              <button
+                type="button"
+                onClick={() => navigate('/about')}
+                aria-label={`Version ${versionInfo.version} - open About`}
+                className="cursor-pointer rounded-full border-0 bg-transparent p-0 outline-none focus-visible:ring-[3px] focus-visible:ring-sidebar-ring/50"
+              >
+                <Badge variant="secondary" className="font-normal text-muted-foreground">
+                  v{versionInfo.version}
+                </Badge>
+              </button>
+            </div>
+          </div>
+        </SidebarHeader>
+
+        <SidebarContent>
+          {accessibleGroups.map((group) => (
+            <NavGroupSection key={group.id} group={group} pathname={location.pathname} />
+          ))}
+        </SidebarContent>
+
+        <SidebarFooter>
+          <div className="flex items-center gap-2 px-2 py-1 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+            <Building2 className="size-3.5 shrink-0" />
+            <span className="truncate">
+              {selectedCompany ? selectedCompany.legal_name : 'All Companies'}
+            </span>
+          </div>
+        </SidebarFooter>
+
+        <SidebarRail />
+      </Sidebar>
+
+      <SidebarInset className="min-w-0">
+        {/* Slim top bar */}
+        <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between gap-3 border-0 border-solid border-b border-border bg-background px-4">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <SidebarTrigger className="-ml-1 shrink-0" />
+            <Separator orientation="vertical" className="mx-1 h-6" />
+
+            {/* Global company filter */}
+            {companiesLoading ? (
+              <Skeleton className="h-8 w-full max-w-56" />
+            ) : (
+              <Select
+                value={selectedCompanyId ?? ALL_COMPANIES}
+                onValueChange={(value) => setSelectedCompanyId(value === ALL_COMPANIES ? null : value)}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="w-full max-w-56 min-w-0 bg-background"
+                  aria-label="Filter by company"
+                >
+                  <Building2 />
+                  <SelectValue placeholder="All Companies" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_COMPANIES}>All Companies</SelectItem>
+                  {companies.map((company) => (
+                    <SelectItem key={company.id} value={company.id}>
+                      {company.legal_name || company.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          {/* User menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" className="h-10 shrink-0 gap-2 px-2" aria-label="Account menu">
+                <Avatar className="size-8">
+                  <AvatarFallback className="bg-primary text-xs font-medium text-primary-foreground">
+                    {getInitials(displayName)}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="hidden max-w-[12rem] truncate text-sm font-medium text-foreground sm:inline">
+                  {displayName}
+                </span>
+                <ChevronDown className="hidden text-muted-foreground sm:block" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="flex flex-col gap-0.5">
+                <span className="truncate text-sm font-medium text-foreground">{displayName}</span>
+                {user?.username && user.username !== displayName && (
+                  <span className="truncate text-xs font-normal text-muted-foreground">{user.username}</span>
+                )}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={handleChangePassword}>
+                <KeyRound />
+                Change My Password
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => navigate('/about')}>
+                <Info />
+                About
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem variant="destructive" onSelect={handleLogout}>
+                <LogOut />
+                Sign Out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </header>
+
+        <div className={cn('w-full flex-1 bg-muted/40 p-4 sm:p-6')}>
+          <SessionManager>
+            {children}
+          </SessionManager>
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
   );
 };

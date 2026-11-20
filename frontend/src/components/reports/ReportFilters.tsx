@@ -1,32 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Box,
-  Typography,
-  TextField,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Button,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  Grid,
-  Switch,
-  FormControlLabel,
-  Divider,
-  Chip,
-  IconButton,
-  Tooltip,
-  Autocomplete,
-  CircularProgress,
-} from '@mui/material';
-import {
-  ExpandMore as ExpandMoreIcon,
-  Clear as ClearIcon,
-  FilterList as FilterIcon,
-  Search as SearchIcon,
-} from '@mui/icons-material';
+  ChevronDown, ChevronUp, FilterX, Loader2, Play, SlidersHorizontal,
+} from 'lucide-react';
 import { ReportFilter, ReportFilters as FilterValues } from '../../types/reports';
 import { useCompanyFilter } from '../../contexts/CompanyFilterContext';
 import { employeeAPI, reportsAPI } from '../../api/client';
@@ -43,13 +18,68 @@ import {
   getFieldDescription,
   SortGroupValidationResult
 } from '../../utils/sortGroupValidation';
+import EmployeeMultiSelect from './EmployeeMultiSelect';
+import type { EmployeeOption } from './EmployeeMultiSelect';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
-interface EmployeeOption {
-  id: string;
-  full_name: string;
-  first_name?: string;
-  last_name?: string;
-}
+/** Radix Select forbids empty-string item values, so "nothing selected" uses a sentinel. */
+const NONE = '__none__';
+
+const Field: React.FC<{
+  label: string;
+  htmlFor?: string;
+  error?: string;
+  hint?: string;
+  className?: string;
+  children: React.ReactNode;
+}> = ({ label, htmlFor, error, hint, className, children }) => (
+  <div className={cn('grid min-w-0 grid-cols-1 content-start gap-1.5', className)}>
+    <Label htmlFor={htmlFor} className="text-xs font-medium text-muted-foreground">
+      {label}
+    </Label>
+    {children}
+    {error ? (
+      <p className="m-0 text-xs text-destructive">{error}</p>
+    ) : hint ? (
+      <p className="m-0 text-xs text-muted-foreground">{hint}</p>
+    ) : null}
+  </div>
+);
+
+const Section: React.FC<{
+  title: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}> = ({ title, open, onToggle, children }) => (
+  <Collapsible open={open} onOpenChange={onToggle} className="border-0 border-b border-solid border-border last:border-b-0">
+    <button
+      type="button"
+      aria-expanded={open}
+      onClick={onToggle}
+      className="flex w-full cursor-pointer items-center justify-between border-0 bg-transparent px-0 py-2 text-left [font-family:inherit] text-sm font-medium text-foreground transition-colors outline-none hover:text-foreground/80 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+    >
+      {title}
+      <ChevronDown
+        className={cn('size-4 text-muted-foreground transition-transform', open && 'rotate-180')}
+      />
+    </button>
+    <CollapsibleContent>
+      <div className="pt-2 pb-4">{children}</div>
+    </CollapsibleContent>
+  </Collapsible>
+);
 
 interface ReportFiltersProps {
   reportType: string;
@@ -58,6 +88,9 @@ interface ReportFiltersProps {
   onApplyFilters: () => void;
   onClearFilters: () => void;
   loading?: boolean;
+  /** Whether the filter body is expanded (controlled by the page). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export const ReportFilters: React.FC<ReportFiltersProps> = ({
@@ -67,8 +100,10 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
   onApplyFilters,
   onClearFilters,
   loading = false,
+  open = true,
+  onOpenChange,
 }) => {
-  // Use companies from the global context instead of fetching them again
+    // Use companies from the global context instead of fetching them again
   const { selectedCompanyId, companies } = useCompanyFilter();
   
   const [filterOptions, setFilterOptions] = useState<{ common_filters: ReportFilter[]; specific_filters: ReportFilter[] } | null>(null);
@@ -203,111 +238,110 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
       return null;
     }
 
-    const fieldProps = {
-      fullWidth: true,
-      size: 'small' as const,
-      error: hasWarning,
-      helperText: hasWarning ? validationResult?.warnings.find(w => w.includes(filter.label)) : undefined,
-    };
+    const warningText = hasWarning
+      ? validationResult?.warnings.find(w => w.includes(filter.label))
+      : undefined;
+    const fieldId = `report-filter-${filter.name}`;
 
     switch (filter.type) {
       case 'text':
         return (
-          <TextField
-            {...fieldProps}
-            label={filter.label}
-            value={value || ''}
-            onChange={(e) => handleFilterChange(filter.name, e.target.value)}
-            placeholder={filter.description}
-          />
+          <Field label={filter.label} htmlFor={fieldId} error={warningText}>
+            <Input
+              id={fieldId}
+              aria-invalid={hasWarning || undefined}
+              value={(value as string) || ''}
+              onChange={(e) => handleFilterChange(filter.name, e.target.value)}
+              placeholder={filter.description}
+            />
+          </Field>
         );
 
       case 'select':
         if (filter.name === 'company_id') {
           return (
-            <FormControl fullWidth size="small" error={hasWarning}>
-              <InputLabel>{filter.label}</InputLabel>
+            <Field label={filter.label} error={warningText}>
               <Select
-                value={value || ''}
-                onChange={(e) => handleFilterChange(filter.name, e.target.value)}
-                label={filter.label}
+                value={(value as string) || NONE}
+                onValueChange={(v) => handleFilterChange(filter.name, v === NONE ? '' : v)}
               >
-                <MenuItem value="">
-                  <em>All Companies</em>
-                </MenuItem>
-                {companies.map((company) => (
-                  <MenuItem key={company.id} value={company.id}>
-                    {company.legal_name}
-                    {company.trade_name && ` (${company.trade_name})`}
-                  </MenuItem>
-                ))}
+                <SelectTrigger id={fieldId} className="w-full" aria-invalid={hasWarning || undefined}>
+                  <SelectValue placeholder="All Companies" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>All Companies</SelectItem>
+                  {companies.map((company) => (
+                    <SelectItem key={company.id} value={company.id}>
+                      {company.legal_name}
+                      {company.trade_name && ` (${company.trade_name})`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
-              {hasWarning && (
-                <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
-                  {validationResult?.warnings.find(w => w.includes(filter.label))}
-                </Typography>
-              )}
-            </FormControl>
+            </Field>
           );
         }
 
         return (
-          <FormControl fullWidth size="small" error={hasWarning}>
-            <InputLabel>{filter.label}</InputLabel>
+          <Field label={filter.label} error={warningText}>
             <Select
-              value={value || ''}
-              onChange={(e) => handleFilterChange(filter.name, e.target.value)}
-              label={filter.label}
+              value={(value as string) || NONE}
+              onValueChange={(v) => handleFilterChange(filter.name, v === NONE ? '' : v)}
             >
-              {filter.options?.map((option) => (
-                <MenuItem key={option} value={option}>
-                  {option}
-                </MenuItem>
-              ))}
+              <SelectTrigger id={fieldId} className="w-full" aria-invalid={hasWarning || undefined}>
+                <SelectValue placeholder="Any" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NONE}>Any</SelectItem>
+                {filter.options?.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option}
+                  </SelectItem>
+                ))}
+              </SelectContent>
             </Select>
-            {hasWarning && (
-              <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
-                {validationResult?.warnings.find(w => w.includes(filter.label))}
-              </Typography>
-            )}
-          </FormControl>
+          </Field>
         );
 
       case 'date':
         return (
-          <TextField
-            {...fieldProps}
-            type="date"
-            label={filter.label}
-            value={value || ''}
-            onChange={(e) => handleFilterChange(filter.name, e.target.value)}
-            InputLabelProps={{ shrink: true }}
-          />
+          <Field label={filter.label} htmlFor={fieldId} error={warningText}>
+            <Input
+              id={fieldId}
+              type="date"
+              aria-invalid={hasWarning || undefined}
+              value={(value as string) || ''}
+              onChange={(e) => handleFilterChange(filter.name, e.target.value)}
+            />
+          </Field>
         );
 
       case 'number':
         return (
-          <TextField
-            {...fieldProps}
-            type="number"
-            label={filter.label}
-            value={value || ''}
-            onChange={(e) => handleFilterChange(filter.name, parseFloat(e.target.value) || undefined)}
-            placeholder={filter.description}
-          />
+          <Field label={filter.label} htmlFor={fieldId} error={warningText}>
+            <Input
+              id={fieldId}
+              type="number"
+              aria-invalid={hasWarning || undefined}
+              value={(value as number | string | undefined) || ''}
+              onChange={(e) => handleFilterChange(filter.name, parseFloat(e.target.value) || undefined)}
+              placeholder={filter.description}
+            />
+          </Field>
         );
 
       case 'boolean':
         return (
-          <FormControlLabel
-            control={
-              <Switch
-                checked={Boolean(value)}
-                onChange={(e) => handleFilterChange(filter.name, e.target.checked)}
-              />
-            }
-            label={filter.label}
-          />
+          <div className="flex items-center gap-2 self-end pb-2">
+            <Checkbox
+              id={fieldId}
+              checked={Boolean(value)}
+              onCheckedChange={(checked) => handleFilterChange(filter.name, checked === true)}
+            />
+            <Label htmlFor={fieldId} className="cursor-pointer text-sm font-normal text-foreground">
+              {filter.label}
+            </Label>
+          </div>
         );
 
       case 'multiselect':
@@ -317,83 +351,30 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
             : [];
           const selectedEmployees = employees.filter((emp) => selectedIds.includes(emp.id));
           return (
-            <Autocomplete
-              multiple
-              options={employees}
-              value={selectedEmployees}
-              loading={employeesLoading}
-              disabled={!filters.company_id && !selectedCompanyId}
-              filterSelectedOptions
-              isOptionEqualToValue={(option, val) => option.id === val.id}
-              getOptionLabel={(option) => `${option.full_name} (${option.id})`}
-              onChange={(_, newValue) => {
-                handleFilterChange(
-                  filter.name,
-                  newValue.length > 0 ? newValue.map((e) => e.id).join(',') : undefined
-                );
-              }}
-              filterOptions={(options, { inputValue }) => {
-                const term = inputValue.trim().toLowerCase();
-                if (!term) return options;
-                return options.filter((opt) =>
-                  (opt.full_name || '').toLowerCase().includes(term) ||
-                  (opt.id || '').toLowerCase().includes(term) ||
-                  (opt.first_name || '').toLowerCase().includes(term) ||
-                  (opt.last_name || '').toLowerCase().includes(term)
-                );
-              }}
-              renderTags={(tagValue, getTagProps) =>
-                tagValue.map((option, index) => (
-                  <Chip
-                    label={option.full_name}
-                    size="small"
-                    {...getTagProps({ index })}
-                    key={option.id}
-                  />
-                ))
-              }
-              renderOption={(props, option) => {
-                const { key, ...otherProps } = props as React.HTMLAttributes<HTMLLIElement> & { key?: string };
-                return (
-                  <Box component="li" key={key ?? option.id} {...otherProps}>
-                    <Box>
-                      <Typography variant="body2">{option.full_name}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        ID: {option.id}
-                      </Typography>
-                    </Box>
-                  </Box>
-                );
-              }}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label={filter.label}
-                  placeholder={selectedEmployees.length === 0 ? 'Type name to select…' : ''}
-                  size="small"
-                  error={hasWarning}
-                  helperText={
-                    hasWarning
-                      ? validationResult?.warnings.find((w) => w.includes(filter.label))
-                      : 'Leave empty for all employees'
-                  }
-                  InputProps={{
-                    ...params.InputProps,
-                    endAdornment: (
-                      <>
-                        {employeesLoading ? <CircularProgress color="inherit" size={16} /> : null}
-                        {params.InputProps.endAdornment}
-                      </>
-                    ),
-                  }}
-                />
-              )}
-              noOptionsText={
-                !filters.company_id && !selectedCompanyId
-                  ? 'Select a company first'
-                  : 'No matching employees'
-              }
-            />
+            <Field
+              label={filter.label}
+              error={warningText}
+              hint="Leave empty for all employees"
+            >
+              <EmployeeMultiSelect
+                employees={employees}
+                selected={selectedEmployees}
+                loading={employeesLoading}
+                disabled={!filters.company_id && !selectedCompanyId}
+                invalid={hasWarning}
+                noOptionsText={
+                  !filters.company_id && !selectedCompanyId
+                    ? 'Select a company first'
+                    : 'No matching employees'
+                }
+                onChange={(newValue) => {
+                  handleFilterChange(
+                    filter.name,
+                    newValue.length > 0 ? newValue.map((e: EmployeeOption) => e.id).join(',') : undefined
+                  );
+                }}
+              />
+            </Field>
           );
         }
         return null;
@@ -403,7 +384,7 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
     }
   };
 
-  const getActiveFiltersCount = () => {
+    const getActiveFiltersCount = () => {
     return Object.values(filters).filter(value => 
       value !== undefined && value !== '' && value !== null && !(Array.isArray(value) && value.length === 0)
     ).length;
@@ -439,268 +420,241 @@ export const ReportFilters: React.FC<ReportFiltersProps> = ({
     setShowValidationErrors(false);
   };
 
+  const sortError = sortGroupValidation?.errors.find((e) => e.includes('Sort field'));
+  const groupError = sortGroupValidation?.errors.find((e) => e.includes('Group field'));
+  const secondaryError = sortGroupValidation?.errors.find((e) => e.includes('Secondary group field'));
+  const activeCount = getActiveFiltersCount();
+  const generateDisabled =
+    loading ||
+    (validationResult ? !validationResult.isValid : false) ||
+    (sortGroupValidation ? !sortGroupValidation.isValid : false);
+
+  const renderFilterGrid = (list: ReportFilter[], wideMultiselect: boolean) => (
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      {list.map((filter) => {
+        const field = renderFilterField(filter);
+        if (!field) return null;
+        return (
+          <div
+            key={filter.name}
+            className={cn('min-w-0', wideMultiselect && filter.type === 'multiselect' && 'sm:col-span-2')}
+          >
+            {field}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   if (!filterOptions) {
     return (
-      <Box sx={{ p: 2 }}>
-        <Typography>Loading filter options...</Typography>
-      </Box>
+      <Card className="gap-3 p-4">
+        <Skeleton className="h-6 w-40" />
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-9 w-full" />
+          ))}
+        </div>
+      </Card>
     );
   }
 
-
   return (
-    <Box sx={{ p: 2 }}>
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-        <FilterIcon sx={{ mr: 1 }} />
-        <Typography variant="h6">
-          Report Filters
-        </Typography>
-        {getActiveFiltersCount() > 0 && (
-          <Chip
-            label={`${getActiveFiltersCount()} active`}
-            size="small"
-            color="primary"
-            sx={{ ml: 2 }}
-          />
-        )}
-        {validationResult && !validationResult.isValid && (
-          <Chip
-            label={`${validationResult.errors.length} error${validationResult.errors.length !== 1 ? 's' : ''}`}
-            size="small"
-            color="error"
-            sx={{ ml: 1 }}
-          />
-        )}
-        {validationResult && validationResult.warnings.length > 0 && (
-          <Chip
-            label={`${validationResult.warnings.length} warning${validationResult.warnings.length !== 1 ? 's' : ''}`}
-            size="small"
-            color="warning"
-            sx={{ ml: 1 }}
-          />
-        )}
-      </Box>
-
-      {/* Validation Errors */}
-      {showValidationErrors && validationResult && !validationResult.isValid && (
-        <Box sx={{ mb: 2, p: 2, bgcolor: 'error.light', borderRadius: 1 }}>
-          <Typography variant="subtitle2" color="error" gutterBottom>
-            Filter Validation Errors:
-          </Typography>
-          {validationResult.errors.map((error, index) => (
-            <Typography key={index} variant="body2" color="error" sx={{ ml: 1 }}>
-              • {error}
-            </Typography>
-          ))}
-        </Box>
-      )}
-
-      {/* Validation Warnings */}
-      {((validationResult?.warnings?.length || 0) > 0 || (sortGroupValidation?.warnings?.length || 0) > 0) && (
-        <Box sx={{ mb: 2, p: 2, bgcolor: 'warning.light', borderRadius: 1 }}>
-          <Typography variant="subtitle2" color="warning.dark" gutterBottom>
-            Filter Warnings:
-          </Typography>
-          {validationResult?.warnings?.map((warning, index) => (
-            <Typography key={`filter-${index}`} variant="body2" color="warning.dark" sx={{ ml: 1 }}>
-              • {warning}
-            </Typography>
-          ))}
-          {sortGroupValidation?.warnings?.map((warning, index) => (
-            <Typography key={`sortgroup-${index}`} variant="body2" color="warning.dark" sx={{ ml: 1 }}>
-              • {warning}
-            </Typography>
-          ))}
-        </Box>
-      )}
-
-      {/* Common Filters */}
-      {filterOptions.common_filters.length > 0 && (
-        <Accordion 
-          expanded={expandedSections.common}
-          onChange={() => handleSectionToggle('common')}
-        >
-          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Typography variant="subtitle1">
-              Common Filters
-            </Typography>
-          </AccordionSummary>
-          <AccordionDetails>
-            <Grid container spacing={2}>
-              {filterOptions.common_filters.map((filter) => (
-                <Grid
-                  item
-                  xs={12}
-                  sm={filter.type === 'multiselect' ? 12 : 6}
-                  md={filter.type === 'multiselect' ? 8 : 4}
-                  key={filter.name}
-                >
-                  {renderFilterField(filter)}
-                </Grid>
-              ))}
-            </Grid>
-          </AccordionDetails>
-        </Accordion>
-      )}
-
-      {/* Specific Filters */}
-      {filterOptions.specific_filters.length > 0 && (
-        <Accordion 
-          expanded={expandedSections.specific}
-          onChange={() => handleSectionToggle('specific')}
-        >
-          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-            <Typography variant="subtitle1">
-              Specific Filters
-            </Typography>
-          </AccordionSummary>
-          <AccordionDetails>
-            <Grid container spacing={2}>
-              {filterOptions.specific_filters.map((filter) => (
-                <Grid item xs={12} sm={6} md={4} key={filter.name}>
-                  {renderFilterField(filter)}
-                </Grid>
-              ))}
-            </Grid>
-          </AccordionDetails>
-        </Accordion>
-      )}
-
-      {/* Sort and Group By Controls */}
-      <Accordion 
-        expanded={expandedSections.sortGroup}
-        onChange={() => handleSectionToggle('sortGroup')}
-      >
-        <AccordionSummary expandIcon={<ExpandMoreIcon />}>
-          <Typography variant="subtitle1">
-            Sort & Group Options
-          </Typography>
-        </AccordionSummary>
-        <AccordionDetails>
-          <Grid container spacing={2}>
-            {/* Sort Controls */}
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth error={sortGroupValidation?.errors.some(e => e.includes('Sort field')) || false}>
-                <InputLabel>Sort By</InputLabel>
-                <Select
-                  value={filters.sort_by || ''}
-                  onChange={(e) => handleFilterChange('sort_by', e.target.value)}
-                  label="Sort By"
-                >
-                  <MenuItem value="">No Sorting</MenuItem>
-                  {getAvailableSortFields(reportType).map(field => (
-                    <MenuItem key={field} value={field} title={getFieldDescription(field)}>
-                      {getFieldDisplayName(field)}
-                    </MenuItem>
-                  ))}
-                </Select>
-                {sortGroupValidation?.errors.some(e => e.includes('Sort field')) && (
-                  <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
-                    {sortGroupValidation.errors.find(e => e.includes('Sort field'))}
-                  </Typography>
-                )}
-              </FormControl>
-            </Grid>
-            
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel>Sort Direction</InputLabel>
-                <Select
-                  value={filters.sort_direction || 'asc'}
-                  onChange={(e) => handleFilterChange('sort_direction', e.target.value)}
-                  label="Sort Direction"
-                >
-                  <MenuItem value="asc">Ascending (A-Z)</MenuItem>
-                  <MenuItem value="desc">Descending (Z-A)</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
-            
-            {/* Group By Controls */}
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth error={sortGroupValidation?.errors.some(e => e.includes('Group field')) || false}>
-                <InputLabel>Group By</InputLabel>
-                <Select
-                  value={filters.group_by || ''}
-                  onChange={(e) => handleFilterChange('group_by', e.target.value)}
-                  label="Group By"
-                >
-                  <MenuItem value="">No Grouping</MenuItem>
-                  {getAvailableGroupFields(reportType).map(field => (
-                    <MenuItem key={field} value={field} title={`Group by ${getFieldDisplayName(field).toLowerCase()}`}>
-                      {getFieldDisplayName(field)}
-                    </MenuItem>
-                  ))}
-                </Select>
-                {sortGroupValidation?.errors.some(e => e.includes('Group field')) && (
-                  <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
-                    {sortGroupValidation.errors.find(e => e.includes('Group field'))}
-                  </Typography>
-                )}
-              </FormControl>
-            </Grid>
-            
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth error={sortGroupValidation?.errors.some(e => e.includes('Secondary group field')) || false}>
-                <InputLabel>Secondary Group By</InputLabel>
-                <Select
-                  value={filters.group_by_secondary || ''}
-                  onChange={(e) => handleFilterChange('group_by_secondary', e.target.value)}
-                  label="Secondary Group By"
-                  disabled={!filters.group_by}
-                >
-                  <MenuItem value="">No Secondary Grouping</MenuItem>
-                  {getAvailableGroupFields(reportType)
-                    .filter(field => field !== filters.group_by) // Don't allow same field as primary group
-                    .map(field => (
-                      <MenuItem key={field} value={field} title={`Secondary group by ${getFieldDisplayName(field).toLowerCase()}`}>
-                        {getFieldDisplayName(field)}
-                      </MenuItem>
-                    ))}
-                </Select>
-                {sortGroupValidation?.errors.some(e => e.includes('Secondary group field')) && (
-                  <Typography variant="caption" color="error" sx={{ mt: 0.5, ml: 1.75 }}>
-                    {sortGroupValidation.errors.find(e => e.includes('Secondary group field'))}
-                  </Typography>
-                )}
-              </FormControl>
-            </Grid>
-          </Grid>
-          {reportType === 'leave_taken' && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 2 }}>
-              Leave Category groups rows into Vacation, Sick, No Pay (unpaid leave and unpaid sick), and Others, with a day subtotal on each group. Grouping by employee adds those categories under each person.
-            </Typography>
+    <Card className="gap-0 overflow-hidden py-0">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <SlidersHorizontal className="size-4 text-muted-foreground" />
+          <h2 className="m-0 text-sm font-semibold text-foreground">Report Filters</h2>
+          {activeCount > 0 && <Badge variant="secondary">{activeCount} active</Badge>}
+          {validationResult && !validationResult.isValid && (
+            <Badge variant="destructive">
+              {validationResult.errors.length} error{validationResult.errors.length !== 1 ? 's' : ''}
+            </Badge>
           )}
-        </AccordionDetails>
-      </Accordion>
-
-      <Divider sx={{ my: 2 }} />
-
-      {/* Action Buttons */}
-      <Box sx={{ display: 'flex', gap: 2, justifyContent: 'flex-end' }}>
-        <Tooltip title="Clear all filters">
-          <IconButton onClick={handleClearFilters} color="secondary">
-            <ClearIcon />
-          </IconButton>
-        </Tooltip>
-        
+          {validationResult && validationResult.warnings.length > 0 && (
+            <Badge
+              variant="secondary"
+              className="border-transparent bg-event-cra/15 text-event-cra"
+            >
+              {validationResult.warnings.length} warning{validationResult.warnings.length !== 1 ? 's' : ''}
+            </Badge>
+          )}
+        </div>
         <Button
-          variant="outlined"
-          onClick={handleClearFilters}
-          startIcon={<ClearIcon />}
+          variant="outline"
+          size="sm"
+          aria-expanded={open}
+          onClick={() => onOpenChange?.(!open)}
         >
-          Clear
+          {open ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+          {open ? 'Hide Filters' : 'Show Filters'}
         </Button>
-        
-        <Button
-          variant="contained"
-          onClick={handleApplyFilters}
-          startIcon={<SearchIcon />}
-          disabled={loading || (validationResult ? !validationResult.isValid : false) || (sortGroupValidation ? !sortGroupValidation.isValid : false)}
-        >
-          {loading ? 'Generating...' : 'Generate Report'}
-        </Button>
-      </Box>
-    </Box>
+      </div>
+
+      <Collapsible open={open} onOpenChange={onOpenChange}>
+        <CollapsibleContent>
+          <div className="border-0 border-t border-solid border-border px-4 pt-3 pb-4">
+            {/* Validation Errors */}
+            {showValidationErrors && validationResult && !validationResult.isValid && (
+              <div
+                role="alert"
+                className="mb-3 rounded-md border border-solid border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive"
+              >
+                <p className="m-0 font-medium">Filter Validation Errors:</p>
+                <ul className="m-0 mt-1 list-none space-y-0.5 p-0">
+                  {validationResult.errors.map((error, index) => (
+                    <li key={index}>• {error}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Validation Warnings */}
+            {((validationResult?.warnings?.length || 0) > 0 ||
+              (sortGroupValidation?.warnings?.length || 0) > 0) && (
+              <div className="mb-3 rounded-md border border-solid border-event-cra/30 bg-event-cra/10 p-3 text-sm text-event-cra">
+                <p className="m-0 font-medium">Filter Warnings:</p>
+                <ul className="m-0 mt-1 list-none space-y-0.5 p-0">
+                  {validationResult?.warnings?.map((warning, index) => (
+                    <li key={`filter-${index}`}>• {warning}</li>
+                  ))}
+                  {sortGroupValidation?.warnings?.map((warning, index) => (
+                    <li key={`sortgroup-${index}`}>• {warning}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div>
+              {filterOptions.common_filters.length > 0 && (
+                <Section
+                  title="Common Filters"
+                  open={expandedSections.common}
+                  onToggle={() => handleSectionToggle('common')}
+                >
+                  {renderFilterGrid(filterOptions.common_filters, true)}
+                </Section>
+              )}
+
+              {filterOptions.specific_filters.length > 0 && (
+                <Section
+                  title="Specific Filters"
+                  open={expandedSections.specific}
+                  onToggle={() => handleSectionToggle('specific')}
+                >
+                  {renderFilterGrid(filterOptions.specific_filters, false)}
+                </Section>
+              )}
+
+              <Section
+                title="Sort & Group Options"
+                open={expandedSections.sortGroup}
+                onToggle={() => handleSectionToggle('sortGroup')}
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label="Sort By" error={sortError}>
+                    <Select
+                      value={filters.sort_by || NONE}
+                      onValueChange={(v) => handleFilterChange('sort_by', v === NONE ? '' : v)}
+                    >
+                      <SelectTrigger className="w-full" aria-invalid={!!sortError || undefined}>
+                        <SelectValue placeholder="No Sorting" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>No Sorting</SelectItem>
+                        {getAvailableSortFields(reportType).map((field) => (
+                          <SelectItem key={field} value={field} title={getFieldDescription(field)}>
+                            {getFieldDisplayName(field)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+
+                  <Field label="Sort Direction">
+                    <Select
+                      value={filters.sort_direction || 'asc'}
+                      onValueChange={(v) => handleFilterChange('sort_direction', v)}
+                    >
+                      <SelectTrigger className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="asc">Ascending (A-Z)</SelectItem>
+                        <SelectItem value="desc">Descending (Z-A)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+
+                  <Field label="Group By" error={groupError}>
+                    <Select
+                      value={filters.group_by || NONE}
+                      onValueChange={(v) => handleFilterChange('group_by', v === NONE ? '' : v)}
+                    >
+                      <SelectTrigger className="w-full" aria-invalid={!!groupError || undefined}>
+                        <SelectValue placeholder="No Grouping" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>No Grouping</SelectItem>
+                        {getAvailableGroupFields(reportType).map((field) => (
+                          <SelectItem
+                            key={field}
+                            value={field}
+                            title={`Group by ${getFieldDisplayName(field).toLowerCase()}`}
+                          >
+                            {getFieldDisplayName(field)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+
+                  <Field label="Secondary Group By" error={secondaryError}>
+                    <Select
+                      value={filters.group_by_secondary || NONE}
+                      onValueChange={(v) => handleFilterChange('group_by_secondary', v === NONE ? '' : v)}
+                      disabled={!filters.group_by}
+                    >
+                      <SelectTrigger className="w-full" aria-invalid={!!secondaryError || undefined}>
+                        <SelectValue placeholder="No Secondary Grouping" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NONE}>No Secondary Grouping</SelectItem>
+                        {getAvailableGroupFields(reportType)
+                          .filter((field) => field !== filters.group_by) // Don't allow same field as primary group
+                          .map((field) => (
+                            <SelectItem
+                              key={field}
+                              value={field}
+                              title={`Secondary group by ${getFieldDisplayName(field).toLowerCase()}`}
+                            >
+                              {getFieldDisplayName(field)}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                {reportType === 'leave_taken' && (
+                  <p className="m-0 mt-3 text-xs text-muted-foreground">
+                    Leave Category groups rows into Vacation, Sick, No Pay (unpaid leave and unpaid sick), and Others, with a day subtotal on each group. Grouping by employee adds those categories under each person.
+                  </p>
+                )}
+              </Section>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 border-0 border-t border-solid border-border pt-4">
+              <Button variant="outline" onClick={handleClearFilters}>
+                <FilterX className="size-4" /> Clear Filters
+              </Button>
+              <Button onClick={handleApplyFilters} disabled={generateDisabled}>
+                {loading ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
+                {loading ? 'Generating...' : 'Generate Report'}
+              </Button>
+            </div>
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+    </Card>
   );
 };

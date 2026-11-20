@@ -1,17 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Box,
-  Typography,
-  Paper,
-  Tabs,
-  Tab,
-  Alert,
-  CircularProgress,
-  Backdrop,
-} from '@mui/material';
+  Download, FileBarChart, FileText, Printer, RefreshCw, ShieldAlert, Users,
+} from 'lucide-react';
 import { ReportSelector } from '../components/reports/ReportSelector';
 import { ReportFilters } from '../components/reports/ReportFilters';
 import { ReportPreview } from '../components/reports/ReportPreview';
+import { getReportIcon } from '../components/reports/reportCatalog';
+import AppToast from '../components/AppToast';
 import { reportsAPI } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useCompanyFilter } from '../contexts/CompanyFilterContext';
@@ -22,6 +17,9 @@ import {
 import { FILTER_CONFIGS } from '../utils/filterValidation';
 import { downloadVacationLedgerPdfsByEmployee } from '../utils/vacationLedgerPdf';
 import { formatLeaveDays, leaveGroupHeading } from '../utils/leaveReportFormat';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
 // Dynamic import for ExcelJS
 
 // Helper function to format dates correctly without timezone issues
@@ -42,30 +40,7 @@ const formatDateString = (dateString: string | null | undefined): string => {
   }
 };
 
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`reports-tabpanel-${index}`}
-      aria-labelledby={`reports-tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
-    </div>
-  );
-}
-
 export default function ReportsPage() {
-  const [tabValue, setTabValue] = useState(0);
   const [reportTypes, setReportTypes] = useState<ReportType[]>([]);
   const [selectedReportType, setSelectedReportType] = useState<string>('');
   const [filters, setFilters] = useState<FilterValues>({});
@@ -73,6 +48,9 @@ export default function ReportsPage() {
   const [reportSummary, setReportSummary] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [typesLoading, setTypesLoading] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const closeError = useCallback(() => setError(null), []);
   
   const { hasPermission } = useAuth();
   const { companies } = useCompanyFilter();
@@ -88,6 +66,8 @@ export default function ReportsPage() {
       } catch (error) {
         console.error('Error loading report types:', error);
         setError('Failed to load report types');
+      } finally {
+        setTypesLoading(false);
       }
     };
 
@@ -97,21 +77,20 @@ export default function ReportsPage() {
   // Check permissions after hooks
   if (!hasPermission('report:view')) {
     return (
-      <Box sx={{ p: 3 }}>
-        <Alert severity="error">
-          You don't have permission to access reports. Please contact your administrator.
+      <div className="p-6">
+        <Alert variant="destructive">
+          <ShieldAlert className="size-4" />
+          <AlertDescription>
+            You don't have permission to access reports. Please contact your administrator.
+          </AlertDescription>
         </Alert>
-      </Box>
+      </div>
     );
   }
 
-  const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
-    setTabValue(newValue);
-  };
-
   const handleSelectReport = (reportType: string) => {
     setSelectedReportType(reportType);
-    setTabValue(1); // Switch to filters tab
+    setFiltersOpen(true);
     setReportData([]);
     setReportSummary(null);
     setError(null);
@@ -180,7 +159,7 @@ export default function ReportsPage() {
         
         setReportData(response.data.data);
         setReportSummary(response.data.summary);
-        setTabValue(2); // Switch to preview tab
+        setFiltersOpen(false);
       } else {
         setError('Failed to generate report');
       }
@@ -1155,93 +1134,120 @@ export default function ReportsPage() {
     handleApplyFilters();
   };
 
+
+  const selectedReport = reportTypes.find((r) => r.type === selectedReportType);
+  const SelectedIcon = getReportIcon(selectedReportType);
+  const hasResults = !!reportSummary;
+  const hasRows = reportData.length > 0;
+  const isGroupedResult = !!(
+    reportSummary?.group_by_applied && reportSummary.group_by_applied.length > 0
+  );
+
+  const renderResults = () => {
+    if (loading || hasResults) {
+      return (
+        <ReportPreview
+          reportType={selectedReportType}
+          data={reportData}
+          summary={reportSummary}
+          loading={loading}
+          isGrouped={isGroupedResult}
+          appliedFilters={filters}
+        />
+      );
+    }
+    return (
+      <Card className="items-center gap-2 px-6 py-16 text-center">
+        <FileBarChart className="size-8 text-muted-foreground" />
+        <p className="m-0 text-sm font-medium text-foreground">No report generated yet</p>
+        <p className="m-0 text-sm text-muted-foreground">
+          Configure your filters above and click Generate Report.
+        </p>
+      </Card>
+    );
+  };
+
   return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>
-        📊 HR Reports
-      </Typography>
-      <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-        Generate comprehensive reports across all HR operations with flexible filtering options.
-      </Typography>
+    <div className="space-y-4 p-6">
+      <div>
+        <h1 className="m-0 text-2xl font-semibold tracking-tight text-foreground">HR Reports</h1>
+        <p className="m-0 mt-1 text-sm text-muted-foreground">
+          Generate, filter, and export operational HR reports
+        </p>
+      </div>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
-
-      <Paper sx={{ width: '100%' }}>
-        <Box sx={{ borderBottom: 1, borderColor: 'divider' }}>
-          <Tabs value={tabValue} onChange={handleTabChange} aria-label="reports tabs">
-            <Tab label="Select Report" />
-            <Tab label="Configure Filters" disabled={!selectedReportType} />
-            <Tab label="View Report" disabled={!reportData.length} />
-          </Tabs>
-        </Box>
-
-        <TabPanel value={tabValue} index={0}>
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-12">
+        <aside className="lg:sticky lg:top-4 lg:col-span-3">
           <ReportSelector
             reportTypes={reportTypes}
             onSelectReport={handleSelectReport}
             selectedReportType={selectedReportType}
+            loading={typesLoading}
           />
-        </TabPanel>
+        </aside>
 
-        <TabPanel value={tabValue} index={1}>
-          {selectedReportType ? (
-            <ReportFilters
-              reportType={selectedReportType}
-              filters={filters}
-              onFiltersChange={handleFiltersChange}
-              onApplyFilters={handleApplyFilters}
-              onClearFilters={handleClearFilters}
-              loading={loading}
-            />
+        <section className="min-w-0 space-y-4 lg:col-span-9">
+          {!selectedReport ? (
+            <Card className="items-center gap-2 px-6 py-20 text-center">
+              <FileText className="size-8 text-muted-foreground" />
+              <p className="m-0 text-sm font-medium text-foreground">Select a report</p>
+              <p className="m-0 text-sm text-muted-foreground">
+                Choose a report from the catalog to configure its filters.
+              </p>
+            </Card>
           ) : (
-            <Alert severity="info">
-              Please select a report type first.
-            </Alert>
-          )}
-        </TabPanel>
+            <>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+                    <SelectedIcon className="size-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="m-0 text-lg font-semibold text-foreground">{selectedReport.name}</h2>
+                    <p className="m-0 text-sm text-muted-foreground">{selectedReport.description}</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button variant="outline" onClick={handleRefresh} disabled={loading || !hasResults}>
+                    <RefreshCw className={loading ? 'size-4 animate-spin' : 'size-4'} /> Refresh
+                  </Button>
+                  <Button variant="outline" onClick={handlePrint} disabled={loading || !hasRows}>
+                    <Printer className="size-4" /> Print
+                  </Button>
+                  {selectedReportType === 'vacation_pay_ledger' && (
+                    <Button
+                      variant="outline"
+                      onClick={handlePrintIndividualVacationLedger}
+                      disabled={loading || !hasRows}
+                      title="Download PDF per employee (ZIP if multiple)"
+                    >
+                      <Users className="size-4" /> Employee PDFs
+                    </Button>
+                  )}
+                  <Button onClick={() => handleExport('xlsx')} disabled={loading || !hasRows}>
+                    <Download className="size-4" /> Export
+                  </Button>
+                </div>
+              </div>
 
-        <TabPanel value={tabValue} index={2}>
-          {reportData.length > 0 && reportSummary ? (
-            <ReportPreview
-              reportType={selectedReportType}
-              data={reportData}
-              summary={reportSummary}
-              loading={loading}
-              onPrint={handlePrint}
-              onPrintIndividual={
-                selectedReportType === 'vacation_pay_ledger'
-                  ? handlePrintIndividualVacationLedger
-                  : undefined
-              }
-              onExport={handleExport}
-              onRefresh={handleRefresh}
-              isGrouped={reportSummary?.group_by_applied && reportSummary.group_by_applied.length > 0}
-              appliedFilters={filters}
-            />
-          ) : (
-            <Alert severity="info">
-              No report data available. Please generate a report first.
-            </Alert>
-          )}
-        </TabPanel>
-      </Paper>
+              <ReportFilters
+                reportType={selectedReportType}
+                filters={filters}
+                onFiltersChange={handleFiltersChange}
+                onApplyFilters={handleApplyFilters}
+                onClearFilters={handleClearFilters}
+                loading={loading}
+                open={filtersOpen}
+                onOpenChange={setFiltersOpen}
+              />
 
-      {/* Loading Backdrop */}
-      <Backdrop
-        sx={{ color: '#fff', zIndex: (theme) => theme.zIndex.drawer + 1 }}
-        open={loading}
-      >
-        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-          <CircularProgress color="inherit" />
-          <Typography variant="h6" sx={{ mt: 2 }}>
-            Generating Report...
-          </Typography>
-        </Box>
-      </Backdrop>
-    </Box>
+              {renderResults()}
+            </>
+          )}
+        </section>
+      </div>
+
+      <AppToast message={error} variant="error" onClose={closeError} />
+    </div>
   );
 }

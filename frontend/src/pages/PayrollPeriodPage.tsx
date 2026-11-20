@@ -1,29 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Box,
-  Typography,
-  Paper,
-  Grid,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  CircularProgress,
-  Alert,
-  Chip,
-} from '@mui/material';
-import {
-  CalendarToday as CalendarIcon,
-} from '@mui/icons-material';
+import { CalendarRange } from 'lucide-react';
 import { format } from 'date-fns';
+import AppToast from '../components/AppToast';
 import { companyAPI } from '../api/client';
 import { useCompanyFilter } from '../contexts/CompanyFilterContext';
+import {
+  EmptyState, PageHeader, TableCard, TableSkeleton, Toolbar, adminCellClass, adminHeadClass,
+} from '../components/admin/AdminParts';
+import { Badge } from '@/components/ui/badge';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 
 interface PayPeriod {
   start_date: string;
@@ -44,12 +35,14 @@ interface PayPeriodResponse {
 const PayrollPeriodPage: React.FC = () => {
   // Use companies from the global context instead of fetching them again
   const { companies, loading: companiesLoading } = useCompanyFilter();
-  
+
   const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [payPeriods, setPayPeriods] = useState<PayPeriod[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const closeError = useCallback(() => setError(null), []);
 
   // Auto-select first company when companies load
   useEffect(() => {
@@ -67,7 +60,7 @@ const PayrollPeriodPage: React.FC = () => {
       setError(null);
       const response = await companyAPI.getPayPeriods(selectedCompanyId, selectedYear);
       const periodData = response.data as PayPeriodResponse;
-      
+
       if (periodData.success) {
         setPayPeriods(periodData.data || []);
       } else {
@@ -108,144 +101,115 @@ const PayrollPeriodPage: React.FC = () => {
   };
 
   // Generate year options (current year ± 2 years)
-  const yearOptions = Array.from({ length: 5 }, (_, i) => {
-    const year = new Date().getFullYear() - 2 + i;
-    return year;
-  });
+  const yearOptions = Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - 2 + i);
+
+  const renderBody = () => {
+    if (!selectedCompanyId) {
+      return companiesLoading ? (
+        <TableSkeleton />
+      ) : (
+        <EmptyState
+          icon={CalendarRange}
+          title="Select a company"
+          description="Please select a company to view pay periods."
+        />
+      );
+    }
+    if (loading) return <TableSkeleton />;
+    if (payPeriods.length === 0) {
+      return (
+        <EmptyState
+          icon={CalendarRange}
+          title="No pay periods found"
+          description="Please ensure the company has a Payroll Start Date and Payroll Frequency configured."
+        />
+      );
+    }
+    return (
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className={adminHeadClass}>Period #</TableHead>
+            <TableHead className={adminHeadClass}>Start Date</TableHead>
+            <TableHead className={adminHeadClass}>End Date</TableHead>
+            <TableHead className={cn(adminHeadClass, 'text-right')}>Duration (Days)</TableHead>
+            <TableHead className={adminHeadClass}>Payment Date</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {payPeriods.map((period) => (
+            <TableRow key={period.period_number}>
+              <TableCell className={adminCellClass}>
+                <Badge variant="secondary" className="tabular-nums">
+                  Period {period.period_number}
+                </Badge>
+              </TableCell>
+              <TableCell className={cn(adminCellClass, 'text-sm whitespace-nowrap tabular-nums')}>
+                {formatDate(period.start_date)}
+              </TableCell>
+              <TableCell className={cn(adminCellClass, 'text-sm whitespace-nowrap tabular-nums')}>
+                {formatDate(period.end_date)}
+              </TableCell>
+              <TableCell className={cn(adminCellClass, 'text-right text-sm tabular-nums')}>
+                {period.duration_days}
+              </TableCell>
+              <TableCell className={cn(adminCellClass, 'text-sm font-medium whitespace-nowrap tabular-nums')}>
+                {period.payment_date ? formatDate(period.payment_date) : '-'}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    );
+  };
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" gutterBottom>
-          Payroll Periods
-        </Typography>
-      </Box>
+    <div className="space-y-4 p-6">
+      <PageHeader
+        title="Payroll Periods"
+        subtitle="View each company's pay periods and payment dates by year"
+      />
 
-      {/* Filters */}
-      <Paper sx={{ p: 3, mb: 3 }}>
-        <Grid container spacing={3} alignItems="center">
-          <Grid item xs={12} sm={6}>
-            <FormControl fullWidth>
-              <InputLabel>Company</InputLabel>
-              <Select
-                value={selectedCompanyId}
-                onChange={(e) => setSelectedCompanyId(e.target.value)}
-                label="Company"
-                disabled={companiesLoading}
-              >
-                {companies.map((company) => (
-                  <MenuItem key={company.id} value={company.id}>
-                    {company.legal_name}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} sm={6}>
-            <FormControl fullWidth>
-              <InputLabel>Year</InputLabel>
-              <Select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(Number(e.target.value))}
-                label="Year"
-              >
-                {yearOptions.map((year) => (
-                  <MenuItem key={year} value={year}>
-                    {year}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-        </Grid>
-      </Paper>
+      <Toolbar>
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-3 sm:w-auto">
+          <Select
+            value={selectedCompanyId}
+            onValueChange={setSelectedCompanyId}
+            disabled={companiesLoading}
+          >
+            <SelectTrigger className="w-full sm:w-[320px]" aria-label="Company">
+              <SelectValue placeholder="Select company" />
+            </SelectTrigger>
+            <SelectContent>
+              {companies.map((company) => (
+                <SelectItem key={company.id} value={company.id}>
+                  {company.legal_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={String(selectedYear)} onValueChange={(v) => setSelectedYear(Number(v))}>
+            <SelectTrigger className="w-full sm:w-[120px]" aria-label="Year">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {yearOptions.map((year) => (
+                <SelectItem key={year} value={String(year)}>
+                  {year}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Badge variant="secondary" className="tabular-nums">
+          {payPeriods.length} {payPeriods.length === 1 ? 'period' : 'periods'} · {selectedYear}
+        </Badge>
+      </Toolbar>
 
-      {/* Error Alert */}
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
-
-      {/* Loading State */}
-      {loading && (
-        <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-          <CircularProgress />
-        </Box>
-      )}
-
-      {/* Pay Periods Table */}
-      {!loading && selectedCompanyId && (
-        <Paper>
-          <Box sx={{ p: 3, borderBottom: 1, borderColor: 'divider' }}>
-            <Typography variant="h6">
-              Pay Periods for {companies.find(c => c.id === selectedCompanyId)?.legal_name || selectedCompanyId}
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              {payPeriods.length} period{payPeriods.length !== 1 ? 's' : ''} found for {selectedYear}
-            </Typography>
-          </Box>
-          
-          {payPeriods.length === 0 ? (
-            <Box sx={{ p: 4, textAlign: 'center' }}>
-              <CalendarIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="body1" color="text.secondary">
-                No pay periods found
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Please ensure the company has a Payroll Start Date and Payroll Frequency configured.
-              </Typography>
-            </Box>
-          ) : (
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell><strong>Period #</strong></TableCell>
-                    <TableCell><strong>Start Date</strong></TableCell>
-                    <TableCell><strong>End Date</strong></TableCell>
-                    <TableCell align="right"><strong>Duration (Days)</strong></TableCell>
-                    <TableCell><strong>Payment Date</strong></TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {payPeriods.map((period) => (
-                    <TableRow key={period.period_number} hover>
-                      <TableCell>
-                        <Chip
-                          label={`Period ${period.period_number}`}
-                          color="primary"
-                          size="small"
-                        />
-                      </TableCell>
-                      <TableCell>{formatDate(period.start_date)}</TableCell>
-                      <TableCell>{formatDate(period.end_date)}</TableCell>
-                      <TableCell align="right">{period.duration_days}</TableCell>
-                      <TableCell>{period.payment_date ? formatDate(period.payment_date) : '-'}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          )}
-        </Paper>
-      )}
-
-      {/* No Company Selected */}
-      {!selectedCompanyId && !companiesLoading && (
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <CalendarIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            Select a Company
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Please select a company to view pay periods.
-          </Typography>
-        </Paper>
-      )}
-    </Box>
+      <TableCard>{renderBody()}</TableCard>
+      <AppToast message={error} variant="error" onClose={closeError} />
+    </div>
   );
 };
 
 export default PayrollPeriodPage;
-

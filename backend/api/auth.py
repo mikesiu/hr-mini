@@ -39,7 +39,6 @@ async def login(login_data: LoginRequest):
         from datetime import timedelta
         from api.dependencies import create_access_token
         
-        ACCESS_TOKEN_EXPIRE_MINUTES = 30
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
             data={"sub": user.username}, expires_delta=access_token_expires
@@ -76,8 +75,8 @@ async def login(login_data: LoginRequest):
 async def extend_session(current_user: dict = Depends(get_current_user)):
     """Extend user session by creating a new JWT token"""
     try:
-        # Create new access token with 30 minutes expiration
-        access_token_expires = timedelta(minutes=30)
+        # Create new access token with the standard expiration
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
             data={"sub": current_user["username"]}, expires_delta=access_token_expires
         )
@@ -85,7 +84,7 @@ async def extend_session(current_user: dict = Depends(get_current_user)):
         return {
             "access_token": access_token,
             "token_type": "bearer",
-            "expires_in": 1800  # 30 minutes in seconds
+            "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60
         }
         
     except Exception as e:

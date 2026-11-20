@@ -1,46 +1,35 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Box,
-  Typography,
-  Paper,
-  Button,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  IconButton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  TextField,
-  Grid,
-  Chip,
-  Alert,
-  Snackbar,
-  CircularProgress,
-  InputAdornment,
-  Tooltip,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  FormControlLabel,
-  Checkbox,
-} from '@mui/material';
-import {
-  Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  Search as SearchIcon,
-  Event as EventIcon,
-  Business as BusinessIcon,
-  ContentCopy as ContentCopyIcon,
-} from '@mui/icons-material';
+import { Building2, CalendarDays, Copy, Pencil, Plus, Trash2 } from 'lucide-react';
 import { holidayAPI } from '../api/client';
 import { useCompanyFilter } from '../contexts/CompanyFilterContext';
+import AppToast from '../components/AppToast';
+import {
+  EmptyState, PageHeader, SearchInput, TableCard, TableSkeleton, Toolbar, adminCellClass,
+  adminHeadClass,
+} from '../components/admin/AdminParts';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
+
+const ALL = 'all';
 
 interface Holiday {
   id: number;
@@ -323,465 +312,477 @@ const HolidayPage: React.FC = () => {
     });
   };
 
+  const closeSnackbar = useCallback(() => setSnackbar((s) => ({ ...s, open: false })), []);
+
+  const handleCopySubmit = async () => {
+    if (!copyFormData.source_company_id || !copyFormData.target_company_id) {
+      setSnackbar({
+        open: true,
+        message: 'Please select both source and target companies',
+        severity: 'error',
+      });
+      return;
+    }
+
+    if (copyFormData.source_company_id === copyFormData.target_company_id) {
+      setSnackbar({
+        open: true,
+        message: 'Source and target companies must be different',
+        severity: 'error',
+      });
+      return;
+    }
+
+    try {
+      setCopying(true);
+      const response = await holidayAPI.copy(
+        copyFormData.source_company_id,
+        copyFormData.target_company_id,
+        copyFormData.year,
+        true // skip duplicates
+      );
+
+      setSnackbar({
+        open: true,
+        message: response.data.message || `Successfully copied ${response.data.copied} holiday(s)`,
+        severity: 'success',
+      });
+
+      setCopyDialogOpen(false);
+      fetchHolidays(); // Refresh the list
+    } catch (error: any) {
+      console.error('Error copying holidays:', error);
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.detail || 'Error copying holidays',
+        severity: 'error',
+      });
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  const openCopyDialog = () => {
+    setCopyFormData({
+      source_company_id: '',
+      target_company_id: selectedCompanyId !== 'all' ? selectedCompanyId : '',
+      year: currentYear,
+    });
+    setCopyDialogOpen(true);
+  };
+
+  const hasFilters = !!searchTerm || selectedCompanyId !== 'all' || selectedYear !== 'all';
+  const companyLabel = (c: { id: string; trade_name?: string | null; legal_name: string }) =>
+    `${c.trade_name || c.legal_name} (${c.id})`;
+
+  const renderBody = () => {
+    if (companiesLoading || loading) return <TableSkeleton />;
+    if (filteredHolidays.length === 0) {
+      return (
+        <EmptyState
+          icon={CalendarDays}
+          title="No holidays found"
+          description={hasFilters ? 'Try adjusting your filters' : 'Add your first holiday to get started'}
+          actionLabel={hasFilters ? 'Clear filters' : 'Add Holiday'}
+          actionIcon={hasFilters ? undefined : Plus}
+          onAction={
+            hasFilters
+              ? () => {
+                  setSearchTerm('');
+                  setSelectedCompanyId('all');
+                  setSelectedYear('all');
+                }
+              : companies.length > 0
+                ? () => handleOpenDialog()
+                : undefined
+          }
+        />
+      );
+    }
+    return (
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className={adminHeadClass}>Date</TableHead>
+            <TableHead className={adminHeadClass}>Holiday Name</TableHead>
+            <TableHead className={adminHeadClass}>Company</TableHead>
+            <TableHead className={adminHeadClass}>Status</TableHead>
+            <TableHead className={cn(adminHeadClass, 'text-right')}>Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {filteredHolidays.map((holiday) => (
+            <TableRow key={holiday.id} className={cn(!holiday.is_active && 'opacity-60')}>
+              <TableCell className={cn(adminCellClass, 'text-sm whitespace-nowrap tabular-nums')}>
+                {formatDate(holiday.holiday_date)}
+              </TableCell>
+              <TableCell className={cn(adminCellClass, 'text-sm font-medium text-foreground')}>
+                {holiday.name}
+              </TableCell>
+              <TableCell className={adminCellClass}>
+                <div className="flex items-center gap-2 text-sm whitespace-nowrap">
+                  <Building2 className="size-4 text-muted-foreground" />
+                  {getCompanyName(holiday.company_id)}
+                </div>
+              </TableCell>
+              <TableCell className={adminCellClass}>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Badge
+                    variant="secondary"
+                    className={cn(
+                      holiday.is_active && 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                    )}
+                  >
+                    {holiday.is_active ? 'Active' : 'Inactive'}
+                  </Badge>
+                  {holiday.union_only && <Badge variant="outline">Union Only</Badge>}
+                </div>
+              </TableCell>
+              <TableCell className={adminCellClass}>
+                <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        aria-label="Edit"
+                        onClick={() => handleOpenDialog(holiday)}
+                      >
+                        <Pencil className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Edit</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        aria-label="Delete"
+                        onClick={() => handleDeleteClick(holiday)}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Delete</TooltipContent>
+                  </Tooltip>
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    );
+  };
+
   return (
-    <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" gutterBottom>
-          Holiday Management
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          <Button
-            variant="outlined"
-            startIcon={<ContentCopyIcon />}
-            onClick={() => {
-              setCopyFormData({
-                source_company_id: '',
-                target_company_id: selectedCompanyId !== 'all' ? selectedCompanyId : '',
-                year: currentYear,
-              });
-              setCopyDialogOpen(true);
-            }}
-            disabled={companies.length === 0 || companies.length < 2}
-            sx={{ minWidth: 180 }}
-            title={companies.length < 2 ? 'Need at least 2 companies to copy holidays' : 'Copy holidays from one company to another'}
-          >
-            Copy Holidays
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => handleOpenDialog()}
-            disabled={companies.length === 0}
-            sx={{ minWidth: 150 }}
-          >
-            Add Holiday
-          </Button>
-        </Box>
-      </Box>
+    <div className="space-y-4 p-6">
+      <PageHeader
+        title="Holiday Management"
+        subtitle="Maintain statutory and company holidays used in leave and pay calculations"
+        actions={
+          <>
+            <Button
+              variant="outline"
+              className="rounded-md"
+              onClick={openCopyDialog}
+              disabled={companies.length === 0 || companies.length < 2}
+              title={
+                companies.length < 2
+                  ? 'Need at least 2 companies to copy holidays'
+                  : 'Copy holidays from one company to another'
+              }
+            >
+              <Copy className="size-4" /> Copy Holidays
+            </Button>
+            <Button className="rounded-md" onClick={() => handleOpenDialog()} disabled={companies.length === 0}>
+              <Plus className="size-4" /> Add Holiday
+            </Button>
+          </>
+        }
+      />
 
       {!companiesLoading && !loading && companies.length === 0 && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          No companies found. Please create companies first before adding holidays.
+        <Alert>
+          <AlertDescription>
+            No companies found. Please create companies first before adding holidays.
+          </AlertDescription>
         </Alert>
       )}
 
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Grid container spacing={2}>
-          <Grid item xs={12} md={4}>
-            <FormControl fullWidth>
-              <InputLabel>Filter by Company</InputLabel>
-              <Select
-                value={selectedCompanyId}
-                onChange={(e) => setSelectedCompanyId(e.target.value)}
-                label="Filter by Company"
-                disabled={companiesLoading}
-              >
-                <MenuItem value="all">All Companies</MenuItem>
-                {companies.map((company) => (
-                  <MenuItem key={company.id} value={company.id}>
-                    {company.trade_name || company.legal_name} ({company.id})
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} md={3}>
-            <FormControl fullWidth>
-              <InputLabel>Filter by Year</InputLabel>
-              <Select
-                value={selectedYear}
-                onChange={(e) => setSelectedYear(e.target.value)}
-                label="Filter by Year"
-                disabled={companiesLoading}
-              >
-                <MenuItem value="all">All Years</MenuItem>
-                {yearOptions.map((year) => (
-                  <MenuItem key={year} value={year}>
-                    {year}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Grid>
-          <Grid item xs={12} md={5}>
-            <TextField
-              fullWidth
-              placeholder="Search holidays by name or company..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              disabled={companiesLoading}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon />
-                  </InputAdornment>
-                ),
-              }}
-            />
-          </Grid>
-        </Grid>
-      </Paper>
-
-      {(companiesLoading || loading) ? (
-        <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-          <CircularProgress />
-        </Box>
-      ) : filteredHolidays.length === 0 ? (
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <EventIcon sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            No holidays found
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            {searchTerm || selectedCompanyId !== 'all' || selectedYear !== 'all'
-              ? 'Try adjusting your filters'
-              : 'Add your first holiday to get started'}
-          </Typography>
-        </Paper>
-      ) : (
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Date</TableCell>
-                <TableCell>Holiday Name</TableCell>
-                <TableCell>Company</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell align="right">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredHolidays.map((holiday) => (
-                <TableRow key={holiday.id} hover>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <EventIcon color="action" fontSize="small" />
-                      <Typography variant="body2">
-                        {formatDate(holiday.holiday_date)}
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Typography variant="body2" fontWeight="medium">
-                      {holiday.name}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <BusinessIcon color="action" fontSize="small" />
-                      <Typography variant="body2">
-                        {getCompanyName(holiday.company_id)}
-                      </Typography>
-                    </Box>
-                  </TableCell>
-                  <TableCell>
-                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                      <Chip
-                        label={holiday.is_active ? 'Active' : 'Inactive'}
-                        color={holiday.is_active ? 'success' : 'default'}
-                        size="small"
-                      />
-                      {holiday.union_only && (
-                        <Chip
-                          label="Union Only"
-                          color="info"
-                          size="small"
-                          variant="outlined"
-                        />
-                      )}
-                    </Box>
-                  </TableCell>
-                  <TableCell align="right">
-                    <Tooltip title="Edit">
-                      <IconButton
-                        size="small"
-                        onClick={() => handleOpenDialog(holiday)}
-                        color="primary"
-                      >
-                        <EditIcon />
-                      </IconButton>
-                    </Tooltip>
-                    <Tooltip title="Delete">
-                      <IconButton
-                        size="small"
-                        onClick={() => handleDeleteClick(holiday)}
-                        color="error"
-                      >
-                        <DeleteIcon />
-                      </IconButton>
-                    </Tooltip>
-                  </TableCell>
-                </TableRow>
+      <Toolbar>
+        <div className="flex w-full min-w-0 flex-wrap items-center gap-3 sm:w-auto">
+          <SearchInput
+            value={searchTerm}
+            onChange={setSearchTerm}
+            placeholder="Search holidays by name or company..."
+            ariaLabel="Search holidays"
+          />
+          <Select
+            value={selectedCompanyId}
+            onValueChange={setSelectedCompanyId}
+            disabled={companiesLoading}
+          >
+            <SelectTrigger className="w-full sm:w-[240px]" aria-label="Filter by company">
+              <SelectValue placeholder="All Companies" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All Companies</SelectItem>
+              {companies.map((company) => (
+                <SelectItem key={company.id} value={company.id}>
+                  {companyLabel(company)}
+                </SelectItem>
               ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
+            </SelectContent>
+          </Select>
+          <Select
+            value={String(selectedYear)}
+            onValueChange={(v) => setSelectedYear(v === ALL ? ALL : Number(v))}
+            disabled={companiesLoading}
+          >
+            <SelectTrigger className="w-full sm:w-[130px]" aria-label="Filter by year">
+              <SelectValue placeholder="All Years" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All Years</SelectItem>
+              {yearOptions.map((year) => (
+                <SelectItem key={year} value={String(year)}>
+                  {year}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Badge variant="secondary" className="tabular-nums">
+          {filteredHolidays.length} {filteredHolidays.length === 1 ? 'holiday' : 'holidays'}
+        </Badge>
+      </Toolbar>
+
+      <TableCard>{renderBody()}</TableCard>
 
       {/* Add/Edit Dialog */}
-      <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          {editingHoliday ? 'Edit Holiday' : 'Add Holiday'}
-        </DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12}>
-              <FormControl fullWidth required>
-                <InputLabel>Company</InputLabel>
-                <Select
-                  value={formData.company_id}
-                  onChange={(e) => setFormData({ ...formData, company_id: e.target.value })}
-                  label="Company"
-                  disabled={!!editingHoliday}
-                >
+      <Dialog open={dialogOpen} onOpenChange={(o) => !o && !submitting && handleCloseDialog()}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingHoliday ? 'Edit Holiday' : 'Add Holiday'}</DialogTitle>
+            <DialogDescription>
+              {editingHoliday
+                ? 'Update the holiday details.'
+                : 'Add a holiday for a company.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-1.5">
+              <Label>Company *</Label>
+              <Select
+                value={formData.company_id}
+                onValueChange={(v) => setFormData({ ...formData, company_id: v })}
+                disabled={!!editingHoliday}
+              >
+                <SelectTrigger className="w-full" aria-label="Company">
+                  <SelectValue placeholder="Select company" />
+                </SelectTrigger>
+                <SelectContent>
                   {companies.map((company) => (
-                    <MenuItem key={company.id} value={company.id}>
-                      {company.trade_name || company.legal_name} ({company.id})
-                    </MenuItem>
+                    <SelectItem key={company.id} value={company.id}>
+                      {companyLabel(company)}
+                    </SelectItem>
                   ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Holiday Date"
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="holiday-date">Holiday Date *</Label>
+              <Input
+                id="holiday-date"
                 type="date"
                 value={formData.holiday_date}
                 onChange={(e) => setFormData({ ...formData, holiday_date: e.target.value })}
-                InputLabelProps={{ shrink: true }}
-                required
               />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Holiday Name"
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="holiday-name">Holiday Name *</Label>
+              <Input
+                id="holiday-name"
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                required
                 placeholder="e.g., New Year's Day, Christmas Day"
               />
-            </Grid>
-            <Grid item xs={12}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={formData.is_active}
-                    onChange={(e) => setFormData({ ...formData, is_active: e.target.checked })}
-                  />
-                }
-                label="Active"
+            </div>
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="holiday-active"
+                className="mt-0.5"
+                checked={formData.is_active}
+                onCheckedChange={(c) => setFormData({ ...formData, is_active: c === true })}
               />
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                Inactive holidays will not be excluded from leave calculations
-              </Typography>
-            </Grid>
-            <Grid item xs={12}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={formData.union_only}
-                    onChange={(e) => setFormData({ ...formData, union_only: e.target.checked })}
-                  />
-                }
-                label="Union Members Only"
+              <div className="grid gap-0.5">
+                <Label htmlFor="holiday-active">Active</Label>
+                <p className="m-0 text-xs text-muted-foreground">
+                  Inactive holidays will not be excluded from leave calculations
+                </p>
+              </div>
+            </div>
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="holiday-union"
+                className="mt-0.5"
+                checked={formData.union_only}
+                onCheckedChange={(c) => setFormData({ ...formData, union_only: c === true })}
               />
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                If checked, this holiday will only apply to union members. Non-union employees will not have this holiday excluded from leave calculations or receive stat holiday pay.
-              </Typography>
-            </Grid>
-          </Grid>
+              <div className="grid gap-0.5">
+                <Label htmlFor="holiday-union">Union Members Only</Label>
+                <p className="m-0 text-xs text-muted-foreground">
+                  If checked, this holiday will only apply to union members. Non-union employees will
+                  not have this holiday excluded from leave calculations or receive stat holiday pay.
+                </p>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCloseDialog} disabled={submitting}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={submitting || !formData.company_id || !formData.holiday_date || !formData.name.trim()}
+            >
+              {submitting ? 'Saving…' : editingHoliday ? 'Update' : 'Create'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseDialog} disabled={submitting}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSubmit}
-            variant="contained"
-            disabled={submitting || !formData.company_id || !formData.holiday_date || !formData.name.trim()}
-          >
-            {submitting ? <CircularProgress size={20} /> : editingHoliday ? 'Update' : 'Create'}
-          </Button>
-        </DialogActions>
       </Dialog>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>Delete Holiday</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to delete this holiday? This action cannot be undone.
-          </Typography>
+      {/* Delete Confirmation */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Holiday</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this holiday? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
           {holidayToDelete && (
-            <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
-              <Typography variant="body2">
-                <strong>Date:</strong> {formatDate(holidayToDelete.holiday_date)}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Name:</strong> {holidayToDelete.name}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Company:</strong> {getCompanyName(holidayToDelete.company_id)}
-              </Typography>
-            </Box>
+            <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md bg-muted p-3 text-sm">
+              <dt className="font-medium">Date:</dt>
+              <dd className="m-0 tabular-nums">{formatDate(holidayToDelete.holiday_date)}</dd>
+              <dt className="font-medium">Name:</dt>
+              <dd className="m-0">{holidayToDelete.name}</dd>
+              <dt className="font-medium">Company:</dt>
+              <dd className="m-0">{getCompanyName(holidayToDelete.company_id)}</dd>
+            </dl>
           )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleDeleteConfirm}
-            color="error"
-            variant="contained"
-          >
-            Delete
-          </Button>
-        </DialogActions>
-      </Dialog>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteConfirm();
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Copy Holidays Dialog */}
-      <Dialog open={copyDialogOpen} onClose={() => setCopyDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Copy Holidays from Another Company</DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12}>
-              <FormControl fullWidth required>
-                <InputLabel>Source Company (Copy From)</InputLabel>
-                <Select
-                  value={copyFormData.source_company_id}
-                  onChange={(e) => setCopyFormData({ ...copyFormData, source_company_id: e.target.value })}
-                  label="Source Company (Copy From)"
-                >
+      <Dialog open={copyDialogOpen} onOpenChange={(o) => !o && !copying && setCopyDialogOpen(false)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Copy Holidays from Another Company</DialogTitle>
+            <DialogDescription>
+              Copy a year of holidays from one company to another.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-1.5">
+              <Label>Source Company (Copy From) *</Label>
+              <Select
+                value={copyFormData.source_company_id}
+                onValueChange={(v) => setCopyFormData({ ...copyFormData, source_company_id: v })}
+              >
+                <SelectTrigger className="w-full" aria-label="Source company">
+                  <SelectValue placeholder="Select source company" />
+                </SelectTrigger>
+                <SelectContent>
                   {companies
-                    .filter(c => c.id !== copyFormData.target_company_id)
+                    .filter((c) => c.id !== copyFormData.target_company_id)
                     .map((company) => (
-                      <MenuItem key={company.id} value={company.id}>
-                        {company.trade_name || company.legal_name} ({company.id})
-                      </MenuItem>
+                      <SelectItem key={company.id} value={company.id}>
+                        {companyLabel(company)}
+                      </SelectItem>
                     ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <FormControl fullWidth required>
-                <InputLabel>Target Company (Copy To)</InputLabel>
-                <Select
-                  value={copyFormData.target_company_id}
-                  onChange={(e) => setCopyFormData({ ...copyFormData, target_company_id: e.target.value })}
-                  label="Target Company (Copy To)"
-                >
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Target Company (Copy To) *</Label>
+              <Select
+                value={copyFormData.target_company_id}
+                onValueChange={(v) => setCopyFormData({ ...copyFormData, target_company_id: v })}
+              >
+                <SelectTrigger className="w-full" aria-label="Target company">
+                  <SelectValue placeholder="Select target company" />
+                </SelectTrigger>
+                <SelectContent>
                   {companies
-                    .filter(c => c.id !== copyFormData.source_company_id)
+                    .filter((c) => c.id !== copyFormData.source_company_id)
                     .map((company) => (
-                      <MenuItem key={company.id} value={company.id}>
-                        {company.trade_name || company.legal_name} ({company.id})
-                      </MenuItem>
+                      <SelectItem key={company.id} value={company.id}>
+                        {companyLabel(company)}
+                      </SelectItem>
                     ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Year"
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="copy-year">Year *</Label>
+              <Input
+                id="copy-year"
                 type="number"
+                min={2000}
+                max={2100}
                 value={copyFormData.year}
-                onChange={(e) => setCopyFormData({ ...copyFormData, year: parseInt(e.target.value) || currentYear })}
-                inputProps={{ min: 2000, max: 2100 }}
-                required
+                onChange={(e) =>
+                  setCopyFormData({ ...copyFormData, year: parseInt(e.target.value) || currentYear })
+                }
               />
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              <p className="m-0 text-xs text-muted-foreground">
                 Holidays from the selected year will be copied to the target company
-              </Typography>
-            </Grid>
-            <Grid item xs={12}>
-              <Alert severity="info">
-                This will copy all holidays from the source company for the selected year to the target company.
-                Duplicate holidays (same date) will be skipped automatically.
-              </Alert>
-            </Grid>
-          </Grid>
+              </p>
+            </div>
+            <Alert>
+              <AlertDescription>
+                This will copy all holidays from the source company for the selected year to the
+                target company. Duplicate holidays (same date) will be skipped automatically.
+              </AlertDescription>
+            </Alert>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCopyDialogOpen(false)} disabled={copying}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCopySubmit}
+              disabled={copying || !copyFormData.source_company_id || !copyFormData.target_company_id}
+            >
+              <Copy className="size-4" /> {copying ? 'Copying...' : 'Copy Holidays'}
+            </Button>
+          </DialogFooter>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCopyDialogOpen(false)} disabled={copying}>
-            Cancel
-          </Button>
-          <Button
-            onClick={async () => {
-              if (!copyFormData.source_company_id || !copyFormData.target_company_id) {
-                setSnackbar({
-                  open: true,
-                  message: 'Please select both source and target companies',
-                  severity: 'error',
-                });
-                return;
-              }
-
-              if (copyFormData.source_company_id === copyFormData.target_company_id) {
-                setSnackbar({
-                  open: true,
-                  message: 'Source and target companies must be different',
-                  severity: 'error',
-                });
-                return;
-              }
-
-              try {
-                setCopying(true);
-                const response = await holidayAPI.copy(
-                  copyFormData.source_company_id,
-                  copyFormData.target_company_id,
-                  copyFormData.year,
-                  true // skip duplicates
-                );
-
-                setSnackbar({
-                  open: true,
-                  message: response.data.message || `Successfully copied ${response.data.copied} holiday(s)`,
-                  severity: 'success',
-                });
-
-                setCopyDialogOpen(false);
-                fetchHolidays(); // Refresh the list
-              } catch (error: any) {
-                console.error('Error copying holidays:', error);
-                setSnackbar({
-                  open: true,
-                  message: error.response?.data?.detail || 'Error copying holidays',
-                  severity: 'error',
-                });
-              } finally {
-                setCopying(false);
-              }
-            }}
-            variant="contained"
-            disabled={copying || !copyFormData.source_company_id || !copyFormData.target_company_id}
-            startIcon={copying ? <CircularProgress size={16} /> : <ContentCopyIcon />}
-          >
-            {copying ? 'Copying...' : 'Copy Holidays'}
-          </Button>
-        </DialogActions>
       </Dialog>
 
-      {/* Snackbar for notifications */}
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-      >
-        <Alert
-          onClose={() => setSnackbar({ ...snackbar, open: false })}
-          severity={snackbar.severity}
-          sx={{ width: '100%' }}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
-    </Box>
+      <AppToast
+        message={snackbar.open ? snackbar.message : null}
+        variant={snackbar.severity}
+        onClose={closeSnackbar}
+      />
+    </div>
   );
 };
 
 export default HolidayPage;
-

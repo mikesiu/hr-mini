@@ -1,22 +1,9 @@
 import React from 'react';
-import {
-  Box,
-  Typography,
-  Paper,
-  Grid,
-  Chip,
-  Tooltip,
-  useTheme,
-} from '@mui/material';
 import { format, startOfMonth, eachDayOfInterval, isSameMonth, isSameDay } from 'date-fns';
-
-interface PayrollEvent {
-  date: string;
-  company_id: string;
-  company_name: string;
-  event_type: 'payroll' | 'cra' | 'union' | 'holiday' | 'probation' | 'work_permit';
-  description: string;
-}
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
+import { EVENT_META, type PayrollEvent } from './payrollEventMeta';
 
 interface PayrollCalendarProps {
   month: Date;
@@ -24,9 +11,9 @@ interface PayrollCalendarProps {
   onDateClick?: (date: Date, events: PayrollEvent[]) => void;
 }
 
+const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
 const PayrollCalendar: React.FC<PayrollCalendarProps> = ({ month, events, onDateClick }) => {
-  const theme = useTheme();
-  
   // Get the first day of the month
   const monthStart = startOfMonth(month);
   
@@ -52,166 +39,104 @@ const PayrollCalendar: React.FC<PayrollCalendarProps> = ({ month, events, onDate
     acc[dateKey].push(event);
     return acc;
   }, {} as Record<string, PayrollEvent[]>);
-  
-  // Get color for event type
-  const getEventColor = (eventType: string) => {
-    switch (eventType) {
-      case 'payroll':
-        return theme.palette.primary.main;
-      case 'cra':
-        return theme.palette.warning.main;
-      case 'union':
-        return theme.palette.success.main;
-      case 'holiday':
-        return '#9c27b0'; // Purple color for better distinction from blue payroll
-      case 'probation':
-        return theme.palette.info.main; // Cyan/blue color for probation reminders
-      case 'work_permit':
-        return theme.palette.error.main;
-      default:
-        return theme.palette.grey[500];
-    }
-  };
 
-  // Get background color for event type
-  const getEventBackgroundColor = (eventType: string) => {
-    switch (eventType) {
-      case 'payroll':
-        return theme.palette.primary.light;
-      case 'cra':
-        return theme.palette.warning.light;
-      case 'union':
-        return theme.palette.success.light;
-      case 'holiday':
-        return '#e1bee7'; // Light purple background
-      case 'probation':
-        return theme.palette.info.light; // Light cyan/blue background
-      case 'work_permit':
-        return theme.palette.error.light;
-      default:
-        return theme.palette.grey[200];
-    }
-  };
-  
-  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  
   return (
-    <Paper sx={{ p: 2 }}>
-      <Typography variant="h6" align="center" gutterBottom>
-        {format(month, 'MMMM yyyy')}
-      </Typography>
-      
-      {/* Day headers */}
-      <Grid container spacing={0}>
-        {dayNames.map((day) => (
-          <Grid 
-            item 
-            xs={12/7} // Fixed width: 12/7 = ~1.714 (equal width for 7 days)
-            key={day} 
-            sx={{ 
-              textAlign: 'center', 
-              py: 1,
-              width: '14.285%', // Fixed width: 100% / 7 days
-              maxWidth: '14.285%', // Ensure it doesn't expand
-              boxSizing: 'border-box', // Include border in width calculation
-            }}
-          >
-            <Typography variant="subtitle2" fontWeight="bold" color="text.secondary">
-              {day}
-            </Typography>
-          </Grid>
-        ))}
-      </Grid>
-      
-      {/* Calendar days */}
-      <Grid container spacing={0}>
-        {calendarDays.map((day, index) => {
-          const dateKey = format(day, 'yyyy-MM-dd');
-          const dayEvents = eventsByDate[dateKey] || [];
-          const isCurrentMonth = isSameMonth(day, month);
-          const isToday = isSameDay(day, new Date());
-          
-          return (
-            <Grid 
-              item 
-              xs={12/7} // Fixed width: 12/7 = ~1.714 (equal width for 7 days)
-              key={index}
-              sx={{ 
-                minHeight: 100,
-                width: '14.285%', // Fixed width: 100% / 7 days
-                maxWidth: '14.285%', // Ensure it doesn't expand
-                border: `1px solid ${theme.palette.divider}`,
-                borderRight: index % 7 === 6 ? `1px solid ${theme.palette.divider}` : 'none',
-                borderBottom: index < 35 ? `1px solid ${theme.palette.divider}` : 'none',
-                p: 0.5,
-                cursor: dayEvents.length > 0 ? 'pointer' : 'default',
-                backgroundColor: isToday ? theme.palette.action.hover : 'transparent',
-                opacity: isCurrentMonth ? 1 : 0.3,
-                overflow: 'hidden', // Prevent content from expanding the cell
-                boxSizing: 'border-box', // Include border in width calculation
-              }}
-              onClick={() => dayEvents.length > 0 && onDateClick?.(day, dayEvents)}
+    <Card className="gap-4 py-5">
+      <CardHeader className="px-5">
+        <CardTitle className="text-center text-lg font-semibold tracking-tight">
+          {format(month, 'MMMM yyyy')}
+        </CardTitle>
+      </CardHeader>
+
+      <CardContent className="px-5">
+        {/* Day headers */}
+        <div className="mb-2 grid grid-cols-7">
+          {dayNames.map((day) => (
+            <div
+              key={day}
+              className="py-1 text-center text-xs font-semibold tracking-wide text-muted-foreground uppercase"
             >
-              <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+              {day}
+            </div>
+          ))}
+        </div>
+
+        {/* Calendar days: 1px gaps over a border-coloured background draw the grid lines */}
+        <div className="box-border grid grid-cols-7 gap-px overflow-hidden rounded-lg border border-solid border-border bg-border">
+          {calendarDays.map((day) => {
+            const dateKey = format(day, 'yyyy-MM-dd');
+            const dayEvents = eventsByDate[dateKey] || [];
+            const isCurrentMonth = isSameMonth(day, month);
+            const isToday = isSameDay(day, new Date());
+            const clickable = dayEvents.length > 0;
+
+            return (
+              <div
+                key={dateKey}
+                role={clickable ? 'button' : undefined}
+                tabIndex={clickable ? 0 : undefined}
+                aria-label={clickable ? `${format(day, 'MMMM d, yyyy')}: ${dayEvents.length} event(s)` : undefined}
+                onClick={() => clickable && onDateClick?.(day, dayEvents)}
+                onKeyDown={(e) => {
+                  if (clickable && (e.key === 'Enter' || e.key === ' ')) {
+                    e.preventDefault();
+                    onDateClick?.(day, dayEvents);
+                  }
+                }}
+                className={cn(
+                  'box-border flex min-h-[96px] min-w-0 flex-col gap-1 overflow-hidden p-1.5 outline-none',
+                  isCurrentMonth ? 'bg-card' : 'bg-muted/50',
+                  clickable &&
+                    'cursor-pointer transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset'
+                )}
+              >
                 {/* Day number */}
-                <Typography 
-                  variant="body2" 
-                  sx={{ 
-                    fontWeight: isToday ? 'bold' : 'normal',
-                    color: isToday ? theme.palette.primary.main : 'inherit',
-                    mb: 0.5,
-                  }}
+                <span
+                  className={cn(
+                    'inline-flex size-6 items-center justify-center rounded-full text-xs',
+                    isToday
+                      ? 'bg-primary font-semibold text-primary-foreground'
+                      : isCurrentMonth
+                        ? 'font-medium text-foreground'
+                        : 'text-muted-foreground/60'
+                  )}
+                  aria-current={isToday ? 'date' : undefined}
                 >
                   {format(day, 'd')}
-                </Typography>
-                
+                </span>
+
                 {/* Events */}
-                <Box sx={{ flex: 1, overflow: 'hidden' }}>
+                <div className={cn('flex min-w-0 flex-col gap-0.5', !isCurrentMonth && 'opacity-50')}>
                   {dayEvents.slice(0, 3).map((event, eventIndex) => (
-                    <Tooltip 
-                      key={eventIndex}
-                      title={`${event.description} - ${event.company_name}`}
-                      placement="top"
-                    >
-                      <Chip
-                        label={event.event_type === 'work_permit' ? 'PERMIT' : event.event_type.toUpperCase()}
-                        size="small"
-                        sx={{
-                          fontSize: '0.6rem',
-                          height: 14,
-                          backgroundColor: getEventBackgroundColor(event.event_type),
-                          color: getEventColor(event.event_type),
-                          fontWeight: 'bold',
-                          mb: 0.25,
-                          display: 'block',
-                          width: '100%',
-                          maxWidth: '100%',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                          '& .MuiChip-label': {
-                            px: 0.25,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          },
-                        }}
-                      />
+                    <Tooltip key={eventIndex}>
+                      <TooltipTrigger asChild>
+                        <span
+                          className={cn(
+                            'block w-full truncate rounded-sm px-1.5 py-0.5 text-[10px] leading-3.5 font-bold tracking-wide',
+                            EVENT_META[event.event_type]?.tint ?? 'bg-muted text-muted-foreground'
+                          )}
+                        >
+                          {EVENT_META[event.event_type]?.shortLabel ?? event.event_type.toUpperCase()}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent side="top">
+                        {`${event.description} - ${event.company_name}`}
+                      </TooltipContent>
                     </Tooltip>
                   ))}
-                  
+
                   {dayEvents.length > 3 && (
-                    <Typography variant="caption" color="text.secondary">
+                    <span className="text-[10px] leading-3.5 text-muted-foreground">
                       +{dayEvents.length - 3} more
-                    </Typography>
+                    </span>
                   )}
-                </Box>
-              </Box>
-            </Grid>
-          );
-        })}
-      </Grid>
-    </Paper>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
   );
 };
 

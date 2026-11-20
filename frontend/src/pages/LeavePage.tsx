@@ -1,166 +1,66 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Box,
-  Typography,
-  Paper,
-  Alert,
-  Grid,
-  Card,
-  CardContent,
-  TextField,
-  Button,
-  Chip,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  IconButton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-  Snackbar,
-  CircularProgress,
-  Stack,
-  Tooltip,
-  Tabs,
-  Tab,
-  CardHeader,
-  Avatar,
-  LinearProgress,
-  Fade,
-  alpha,
-  useTheme,
-} from '@mui/material';
-import {
+  Building2,
+  CalendarDays,
+  HeartPulse,
+  Loader2,
+  Mail,
+  Palmtree,
+  Phone,
+  Plus,
   Search as SearchIcon,
-  Add,
-  Edit,
-  Delete,
-  Event,
-  Person,
-  CheckCircle,
-  Cancel,
-  Warning,
-  Info,
-  BeachAccess,
-  LocalHospital,
-  Email as EmailIcon,
-  Phone as PhoneIcon,
   Upload as UploadIcon,
-  Download as DownloadIcon,
-  Preview as PreviewIcon,
-  CloudUpload as CloudUploadIcon,
-} from '@mui/icons-material';
+  X,
+} from 'lucide-react';
 import { useCompanyFilter } from '../hooks/useCompanyFilter';
 import { useSelectedEmployee } from '../contexts/SelectedEmployeeContext';
 import { apiClient, leaveAPI, leavePayrollAPI, companyAPI } from '../api/client';
-
-// Types
-interface Employee {
-  id: string;
-  first_name: string;
-  last_name: string;
-  full_name: string;
-  email?: string;
-  phone?: string;
-  hire_date?: string;
-  probation_end_date?: string;
-  status: string;
-}
-
-interface LeaveType {
-  id: number;
-  name: string;
-  code: string;
-  days_per_year: number;
-  carry_over: boolean;
-  max_carry_over?: number;
-  is_active: boolean;
-}
-
-interface Leave {
-  id: number;
-  employee_id: string;
-  leave_type_id: number;
-  start_date: string;
-  end_date: string;
-  days_requested: number;
-  reason?: string;
-  status: string;
-  approved_by?: number;
-  approved_at?: string;
-  remarks?: string;
-  created_at: string;
-  updated_at?: string;
-  employee?: Employee;
-}
-
-interface LeaveBalance {
-  employee_id: string;
-  vacation_remaining: number;
-  sick_remaining: number;
-  vacation_entitlement: number;
-  sick_entitlement: number;  // Added for proper sick leave display
-  vacation_earned_date?: string;
-  vacation_expiry_date?: string;
-  hire_date?: string;
-  seniority_start_date?: string;  // Added for transparency
-  years_employed: number;
-}
-
-interface LeaveFormData {
-  leave_type_id: number;
-  start_date: string;
-  end_date: string;
-  days_requested: number;
-  reason: string;
-  status: string;
-}
-
-type LeaveCategory = 'all' | 'vacation' | 'sick' | 'others';
-
-// Upload types
-interface LeaveUploadError {
-  row_number: number;
-  error_message: string;
-}
-
-interface LeaveUploadResponse {
-  success_count: number;
-  skipped_count: number;
-  error_count: number;
-  errors: LeaveUploadError[];
-}
-
-interface LeaveUploadPreviewRow {
-  row_number: number;
-  employee_id: string;
-  leave_type_id: string;
-  start_date: string;
-  end_date: string;
-  days: number;
-  status: string;
-  will_import: boolean;
-  error_message?: string;
-}
-
-interface LeaveUploadPreviewResponse {
-  total_rows: number;
-  valid_rows: number;
-  invalid_rows: number;
-  duplicate_rows: number;
-  rows: LeaveUploadPreviewRow[];
-}
-
+import StatusBadge from '../components/employee/StatusBadge';
+import { getInitials } from '../components/employee/employeeTypes';
+import LeaveEntitlementCard from '../components/leave/LeaveEntitlementCard';
+import LeaveFormDialog from '../components/leave/LeaveFormDialog';
+import LeaveHistoryCard from '../components/leave/LeaveHistoryCard';
+import AppToast from '../components/AppToast';
+import LeaveUploadDialog from '../components/leave/LeaveUploadDialog';
+import {
+  OpeningBalanceDialog,
+  PayrollImportDialog,
+} from '../components/leave/LeavePayrollDialogs';
+import type {
+  Employee,
+  Leave,
+  LeaveBalance,
+  LeaveCategory,
+  LeaveFormData,
+  LeaveStats,
+  LeaveType,
+  LeaveUploadPreviewResponse,
+  LeaveUploadResponse,
+} from '../components/leave/leaveTypes';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 const LeavePage: React.FC = () => {
-  const theme = useTheme();
   const { isFilterActive, getCompanyName, selectedCompanyId } = useCompanyFilter();
   const { selectedEmployee: globalSelectedEmployee, setSelectedEmployee: setGlobalSelectedEmployee } = useSelectedEmployee();
   
@@ -977,34 +877,6 @@ const LeavePage: React.FC = () => {
     setDeleteDialogOpen(true);
   };
 
-  // Get status color
-  const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'active':
-        return 'success';
-      case 'cancelled':
-        return 'error';
-      case 'pending':
-        return 'warning';
-      default:
-        return 'default';
-    }
-  };
-
-  // Get status icon
-  const getStatusIcon = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'active':
-        return <CheckCircle />;
-      case 'cancelled':
-        return <Cancel />;
-      case 'pending':
-        return <Warning />;
-      default:
-        return <Info />;
-    }
-  };
-
   // Upload functions
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -1079,1202 +951,468 @@ const LeavePage: React.FC = () => {
     setUploadDialogOpen(false);
   };
 
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const clearError = useCallback(() => setError(null), []);
+  const clearSuccess = useCallback(() => setSuccess(null), []);
+
+  const currentYear = new Date().getFullYear();
+  const yearOptions: number[] = [];
+  for (let year = currentYear - 2; year <= currentYear + 1; year++) {
+    yearOptions.push(year);
+  }
+
+  // Entitlement cards (same anniversary-period maths as before)
+  const renderEntitlementCards = () => {
+    if (!leaveBalance) return null;
+
+    const seniorityDate = leaveBalance.seniority_start_date || leaveBalance.hire_date;
+    if (!seniorityDate) return null;
+
+    const hireDate = new Date(seniorityDate);
+    const anniversaryMonth = hireDate.getMonth();
+    const anniversaryDay = hireDate.getDate();
+
+    // Previous period: (selectedYear-1) anniversary to selectedYear anniversary
+    let prevStart: Date, prevEnd: Date;
+    try {
+      prevStart = new Date(selectedYear - 1, anniversaryMonth, anniversaryDay);
+      prevEnd = new Date(selectedYear, anniversaryMonth, anniversaryDay - 1, 23, 59, 59);
+    } catch (e) {
+      prevStart = new Date(selectedYear - 1, anniversaryMonth, Math.min(anniversaryDay, 28));
+      prevEnd = new Date(selectedYear, anniversaryMonth, Math.min(anniversaryDay, 28) - 1, 23, 59, 59);
+    }
+
+    // Current period: selectedYear anniversary to (selectedYear+1) anniversary
+    let currStart: Date, currEnd: Date;
+    try {
+      currStart = new Date(selectedYear, anniversaryMonth, anniversaryDay);
+      currEnd = new Date(selectedYear + 1, anniversaryMonth, anniversaryDay - 1, 23, 59, 59);
+    } catch (e) {
+      currStart = new Date(selectedYear, anniversaryMonth, Math.min(anniversaryDay, 28));
+      currEnd = new Date(selectedYear + 1, anniversaryMonth, Math.min(anniversaryDay, 28) - 1, 23, 59, 59);
+    }
+
+    const prevPeriodStats = getVacationStatsForPeriod(prevStart, prevEnd);
+    const currPeriodStats = getVacationStatsForPeriod(currStart, currEnd);
+    const sickStats = getSickLeaveStats();
+
+    const vacationCards: { stats: LeaveStats | null; title: string; key: string }[] = [
+      { stats: prevPeriodStats, title: `Vacation ${selectedYear - 1}-${selectedYear}`, key: 'vacation-prev' },
+      { stats: currPeriodStats, title: `Vacation ${selectedYear}-${selectedYear + 1}`, key: 'vacation-curr' },
+    ];
+
+    return (
+      <>
+        {vacationCards.map(({ stats, title, key }) =>
+          stats ? (
+            <LeaveEntitlementCard
+              key={key}
+              title={title}
+              kind="vacation"
+              stats={stats}
+              selected={selectedCategory === 'vacation'}
+              onSelect={() => setSelectedCategory('vacation')}
+            />
+          ) : null,
+        )}
+        {sickStats && (
+          <LeaveEntitlementCard
+            key="sick"
+            title="Sick Leave"
+            kind="sick"
+            stats={sickStats}
+            selected={selectedCategory === 'sick'}
+            onSelect={() => setSelectedCategory('sick')}
+          />
+        )}
+      </>
+    );
+  };
+
+  const categoryTabs: { value: LeaveCategory; label: string; icon: React.ReactNode }[] = [
+    { value: 'all', label: 'All Leave', icon: <CalendarDays /> },
+    { value: 'vacation', label: 'Vacation', icon: <Palmtree /> },
+    { value: 'sick', label: 'Sick Leave', icon: <HeartPulse /> },
+  ];
+
   return (
-    <Box>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-      <Typography variant="h4" gutterBottom>
-        Leave Dashboard
-      </Typography>
-        <Box display="flex" gap={2}>
+    <div className="flex flex-col gap-5">
+      {/* Page header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="m-0 text-2xl font-semibold tracking-tight text-foreground">
+            Leave Dashboard
+          </h1>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">
+            Track leave entitlements, balances, and history
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
           {deferredCompany && (
             <>
               <Button
-                variant="outlined"
+                variant="outline"
                 onClick={() => setPayrollImportOpen(true)}
-                size="large"
                 disabled={!selectedCompanyId}
               >
                 Import Payroll
               </Button>
               <Button
-                variant="outlined"
+                variant="outline"
                 onClick={() => openOpeningDialog()}
-                size="large"
                 disabled={!selectedEmployee || !selectedCompanyId}
               >
                 Vacation $ Opening
               </Button>
             </>
           )}
-          <Button
-            variant="outlined"
-            startIcon={<UploadIcon />}
-            onClick={() => setUploadDialogOpen(true)}
-            size="large"
-          >
+          <Button variant="outline" onClick={() => setUploadDialogOpen(true)}>
+            <UploadIcon />
             Upload
           </Button>
           <Button
-            variant="contained"
-            startIcon={<Add />}
             onClick={() => {
               resetForm();
               setAddDialogOpen(true);
             }}
-            size="large"
           >
+            <Plus />
             Add Leave
           </Button>
-        </Box>
-      </Box>
-      
-      {/* Company Filter Indicator */}
+        </div>
+      </div>
+
+      {/* Company filter indicator */}
       {isFilterActive && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          <Typography variant="body2">
-            <strong>Company Filter Active:</strong> Showing leave data for {getCompanyName()} only.
-          </Typography>
-        </Alert>
+        <div className="flex items-center gap-2 rounded-lg border border-solid border-border bg-card px-3 py-2 text-sm">
+          <Building2 className="size-4 text-primary" aria-hidden="true" />
+          <span className="font-medium text-foreground">
+            Company Filter Active: Showing leave data for {getCompanyName()} only.
+          </span>
+        </div>
       )}
-      
-      {/* Search and Filter Controls - copied from EmployeePage */}
-      <Paper 
-        sx={{ 
-          p: 3, 
-          mb: 3, 
-          background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.05)} 0%, ${alpha(theme.palette.secondary.main, 0.05)} 100%)`,
-          border: `1px solid ${alpha(theme.palette.primary.main, 0.1)}`,
-        }}
-      >
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-          <TextField
-            label="Search employees"
+
+      {/* Employee search toolbar */}
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-solid border-border bg-card p-3">
+        <div className="relative w-full sm:max-w-md sm:flex-1">
+          <SearchIcon
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+            aria-hidden="true"
+          />
+          <Input
+            ref={searchInputRef}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-            sx={{ 
-              minWidth: 250,
-              '& .MuiOutlinedInput-root': {
-                backgroundColor: 'background.paper',
-              }
-            }}
+            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             placeholder="Search by name, ID, email..."
+            aria-label="Search employees"
+            className="px-9"
           />
-          <Button
-            variant="contained"
-            startIcon={<SearchIcon />}
-            onClick={handleSearch}
-            disabled={loading}
-            sx={{
-              px: 3,
-              py: 1.5,
-              fontWeight: 600,
-              textTransform: 'none',
-              borderRadius: 2,
-            }}
-          >
-            Search
-          </Button>
-          <Button
-            variant="outlined"
-            onClick={() => {
-              setSearchTerm('');
-              loadLeaves();
-            }}
-            disabled={loading}
-            sx={{
-              px: 3,
-              py: 1.5,
-              fontWeight: 500,
-              textTransform: 'none',
-              borderRadius: 2,
-            }}
-          >
-            Clear
-          </Button>
-        </Box>
-      </Paper>
+          {searchTerm && (
+            <button
+              type="button"
+              aria-label="Clear search text"
+              onClick={() => {
+                setSearchTerm('');
+                setSearchResults([]);
+              }}
+              className="absolute top-1/2 right-2 flex size-6 -translate-y-1/2 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            >
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
+        <Button onClick={handleSearch} disabled={loading}>
+          <SearchIcon />
+          Search
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => {
+            setSearchTerm('');
+            setSearchResults([]);
+          }}
+          disabled={loading}
+        >
+          Clear
+        </Button>
+      </div>
 
-      {/* Employee Cards - copied from EmployeePage */}
-      <Box sx={{ mt: 3 }}>
-        {loading ? (
-          <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-            <Typography>Loading employees...</Typography>
-          </Box>
-        ) : searchTerm && searchResults.length === 0 ? (
-          <Paper sx={{ p: 4, textAlign: 'center' }}>
-            <Typography variant="h6" color="text.secondary">
-              No employees found
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Try adjusting your search criteria.
-            </Typography>
-          </Paper>
-        ) : searchResults.length > 0 ? (
-          <Grid container spacing={3}>
-            {searchResults.map((employee) => (
-              <Grid item xs={12} sm={6} md={4} lg={3} key={employee.id}>
-                <Fade in={true} timeout={300}>
-                  <Card
-                    sx={{
-                      height: '100%',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease-in-out',
-                      border: (globalSelectedEmployee?.id === employee.id) ? `2px solid ${theme.palette.primary.main}` : '1px solid',
-                      borderColor: (globalSelectedEmployee?.id === employee.id) ? theme.palette.primary.main : 'divider',
-                      '&:hover': {
-                        transform: 'translateY(-2px)',
-                        boxShadow: theme.shadows[3],
-                        borderColor: theme.palette.primary.main,
-                      },
-                    }}
-                    onClick={() => handleSearchResultClick(employee)}
-                  >
-                    <CardContent sx={{ flexGrow: 1, pb: 1 }}>
-                      {/* Header with Avatar */}
-                      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 2 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                          <Avatar
-                            sx={{
-                              bgcolor: theme.palette.primary.main,
-                              width: 48,
-                              height: 48,
-                              fontSize: '1.2rem',
-                              fontWeight: 'bold',
-                            }}
-                          >
-                            {employee.first_name?.[0]}{employee.last_name?.[0]}
-                          </Avatar>
-                          <Box>
-                            <Typography variant="h6" component="div" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
-                              {employee.full_name}
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              ID: {employee.id}
-                            </Typography>
-                          </Box>
-                        </Box>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Chip
-                            label={employee.status}
-                            color="primary"
-                            size="small"
-                            sx={{ fontWeight: 500 }}
-                          />
-                        </Box>
-                      </Box>
-
-                      {/* Contact Information */}
-                      <Box sx={{ mb: 2 }}>
-                        {employee.email && (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                            <EmailIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
-                              {employee.email}
-                            </Typography>
-                          </Box>
-                        )}
-                        {employee.phone && (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                            <PhoneIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                            <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.875rem' }}>
-                              {employee.phone}
-                            </Typography>
-                          </Box>
-                        )}
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Fade>
-              </Grid>
-            ))}
-          </Grid>
-        ) : null}
-      </Box>
+      {/* Employee search results */}
+      {loading && searchTerm ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 rounded-lg" />
+          ))}
+        </div>
+      ) : searchTerm && searchResults.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 rounded-lg border border-solid border-border bg-card px-6 py-10 text-center">
+          <SearchIcon className="size-10 text-muted-foreground/60" aria-hidden="true" />
+          <p className="m-0 text-sm font-medium text-foreground">No employees found</p>
+          <p className="m-0 text-sm text-muted-foreground">Try adjusting your search criteria.</p>
+        </div>
+      ) : searchResults.length > 0 ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {searchResults.map((employee) => (
+            <button
+              key={employee.id}
+              type="button"
+              onClick={() => handleSearchResultClick(employee)}
+              className={
+                'box-border flex w-full cursor-pointer flex-col gap-2 rounded-lg border border-solid bg-card p-4 text-left text-card-foreground [font-family:inherit] transition-colors outline-none hover:bg-accent/50 focus-visible:ring-[3px] focus-visible:ring-ring/50 ' +
+                (globalSelectedEmployee?.id === employee.id ? 'border-primary' : 'border-border')
+              }
+            >
+              <span className="flex items-center gap-3">
+                <Avatar className="size-10">
+                  <AvatarFallback className="bg-muted text-sm font-medium text-muted-foreground">
+                    {getInitials(employee.first_name, employee.last_name)}
+                  </AvatarFallback>
+                </Avatar>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-sm font-semibold">{employee.full_name}</span>
+                  <span className="truncate text-xs text-muted-foreground">ID: {employee.id}</span>
+                </span>
+                <StatusBadge status={employee.status} />
+              </span>
+              {(employee.email || employee.phone) && (
+                <span className="flex flex-col gap-1 text-xs text-muted-foreground">
+                  {employee.email && (
+                    <span className="flex items-center gap-1.5 truncate">
+                      <Mail className="size-3.5 shrink-0" aria-hidden="true" />
+                      {employee.email}
+                    </span>
+                  )}
+                  {employee.phone && (
+                    <span className="flex items-center gap-1.5">
+                      <Phone className="size-3.5 shrink-0" aria-hidden="true" />
+                      {employee.phone}
+                    </span>
+                  )}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {selectedEmployeeData ? (
         <>
-          {/* Employee Info Header */}
-          <Card sx={{ mb: 3 }}>
-            <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="space-between">
-                <Box display="flex" alignItems="center" gap={2}>
-                  <Avatar sx={{ bgcolor: 'primary.main' }}>
-                    <Person />
-                  </Avatar>
-                  <Box>
-                    <Typography variant="h6">
-                      {selectedEmployeeData.full_name}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      ID: {selectedEmployeeData.id} • 
-                      {selectedEmployeeData.status}
-                      {leaveBalance && ` • ${leaveBalance.years_employed.toFixed(1)} years employed`}
-                    </Typography>
-                  </Box>
-                </Box>
-                
-                {/* Year Selector */}
-                <FormControl size="small" sx={{ minWidth: 120 }}>
-                  <InputLabel>Year</InputLabel>
-                  <Select
-                    value={selectedYear}
-                    label="Year"
-                    onChange={(e) => setSelectedYear(e.target.value as number)}
-                  >
-                    {(() => {
-                      const currentYear = new Date().getFullYear();
-                      const years = [];
-                      for (let year = currentYear - 2; year <= currentYear + 1; year++) {
-                        years.push(
-                          <MenuItem key={year} value={year}>
-                            {year}
-                          </MenuItem>
-                        );
-                      }
-                      return years;
-                    })()}
-                  </Select>
-                </FormControl>
-              </Box>
+          {/* Active employee strip */}
+          <Card className="py-0">
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <Avatar className="size-10">
+                  <AvatarFallback className="bg-primary text-sm font-semibold text-primary-foreground">
+                    {getInitials(selectedEmployeeData.first_name, selectedEmployeeData.last_name)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <p className="m-0 truncate text-base font-semibold text-foreground">
+                    {selectedEmployeeData.full_name}
+                  </p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    <span>ID: {selectedEmployeeData.id}</span>
+                    <span aria-hidden="true">&bull;</span>
+                    <StatusBadge status={selectedEmployeeData.status} />
+                    {leaveBalance && (
+                      <>
+                        <span aria-hidden="true">&bull;</span>
+                        <span className="tabular-nums">
+                          {leaveBalance.years_employed.toFixed(1)} years employed
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span id="leave-year-label" className="text-xs font-medium text-muted-foreground">
+                  Year
+                </span>
+                <Select
+                  value={String(selectedYear)}
+                  onValueChange={(v) => setSelectedYear(Number(v))}
+                >
+                  <SelectTrigger size="sm" className="w-24" aria-labelledby="leave-year-label">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {yearOptions.map((year) => (
+                      <SelectItem key={year} value={String(year)}>
+                        {year}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </CardContent>
           </Card>
 
-          {/* Leave Categories Tabs */}
-          <Paper sx={{ mb: 3 }}>
+          {/* Category tabs + entitlement cards */}
+          <div className="flex flex-col gap-4">
             <Tabs
               value={selectedCategory}
-              onChange={(_, newValue) => setSelectedCategory(newValue)}
-              variant="fullWidth"
-              sx={{ borderBottom: 1, borderColor: 'divider' }}
+              onValueChange={(v) => setSelectedCategory(v as LeaveCategory)}
             >
-              <Tab
-                label="All Leave"
-                value="all"
-                icon={<Event />}
-                iconPosition="start"
-              />
-              <Tab
-                label="Vacation"
-                value="vacation"
-                icon={<BeachAccess />}
-                iconPosition="start"
-              />
-              <Tab
-                label="Sick Leave"
-                value="sick"
-                icon={<LocalHospital />}
-                iconPosition="start"
-              />
+              <TabsList
+                variant="line"
+                className="group-data-[orientation=horizontal]/tabs:h-auto w-full flex-wrap justify-start gap-x-5 gap-y-0 rounded-none border-0 border-solid border-b border-border p-0"
+              >
+                {categoryTabs.map((tab) => (
+                  <TabsTrigger
+                    key={tab.value}
+                    value={tab.value}
+                    className="h-auto flex-none rounded-none px-0.5 pt-1 pb-2.5 group-data-[orientation=horizontal]/tabs:after:bottom-[-1px] data-[state=active]:text-foreground"
+                  >
+                    {tab.icon}
+                    {tab.label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
             </Tabs>
-          </Paper>
 
-          {/* Category Statistics Cards */}
-          <Grid container spacing={3} sx={{ mb: 3 }}>
-            {(() => {
-              if (!leaveBalance) return null;
-              
-              // Calculate anniversary periods
-              const seniorityDate = leaveBalance.seniority_start_date || leaveBalance.hire_date;
-              if (!seniorityDate) return null;
-              
-              const hireDate = new Date(seniorityDate);
-              const anniversaryMonth = hireDate.getMonth();
-              const anniversaryDay = hireDate.getDate();
-              
-              // Previous period: (selectedYear-1) anniversary to selectedYear anniversary
-              let prevStart: Date, prevEnd: Date;
-              try {
-                prevStart = new Date(selectedYear - 1, anniversaryMonth, anniversaryDay);
-                prevEnd = new Date(selectedYear, anniversaryMonth, anniversaryDay - 1, 23, 59, 59);
-              } catch (e) {
-                prevStart = new Date(selectedYear - 1, anniversaryMonth, Math.min(anniversaryDay, 28));
-                prevEnd = new Date(selectedYear, anniversaryMonth, Math.min(anniversaryDay, 28) - 1, 23, 59, 59);
-              }
-              
-              // Current period: selectedYear anniversary to (selectedYear+1) anniversary  
-              let currStart: Date, currEnd: Date;
-              try {
-                currStart = new Date(selectedYear, anniversaryMonth, anniversaryDay);
-                currEnd = new Date(selectedYear + 1, anniversaryMonth, anniversaryDay - 1, 23, 59, 59);
-              } catch (e) {
-                currStart = new Date(selectedYear, anniversaryMonth, Math.min(anniversaryDay, 28));
-                currEnd = new Date(selectedYear + 1, anniversaryMonth, Math.min(anniversaryDay, 28) - 1, 23, 59, 59);
-              }
-              
-              const prevPeriodStats = getVacationStatsForPeriod(prevStart, prevEnd);
-              const currPeriodStats = getVacationStatsForPeriod(currStart, currEnd);
-              const sickStats = getSickLeaveStats();
-              
-              const vacationCards = [
-                { stats: prevPeriodStats, title: `Vacation ${selectedYear - 1}-${selectedYear}`, key: 'vacation-prev' },
-                { stats: currPeriodStats, title: `Vacation ${selectedYear}-${selectedYear + 1}`, key: 'vacation-curr' }
-              ];
-              
-              return (
-                <>
-                  {/* Two Vacation Cards */}
-                  {vacationCards.map(({ stats, title, key }) => {
-                    if (!stats) return null;
-                    
-                    return (
-                      <Grid item xs={12} md={4} key={key}>
-                        <Card 
-                          sx={{ 
-                            height: '100%',
-                            cursor: 'pointer',
-                            border: selectedCategory === 'vacation' ? 2 : 1,
-                            borderColor: selectedCategory === 'vacation' ? 'primary.main' : 'divider',
-                            '&:hover': { boxShadow: 3 }
-                          }}
-                          onClick={() => setSelectedCategory('vacation')}
-                        >
-                          <CardHeader
-                            avatar={
-                              <Avatar sx={{ bgcolor: 'primary.main' }}>
-                                <BeachAccess />
-                              </Avatar>
-                            }
-                            title={title}
-                            action={
-                              selectedCategory === 'vacation' && (
-                                <Chip label="Selected" color="primary" size="small" />
-                              )
-                            }
-                          />
-                          <CardContent>
-                            <Box>
-                              <Grid container spacing={2} textAlign="center">
-                                <Grid item xs={4}>
-                                  <Typography variant="h6" color="text.secondary">
-                                    {stats.entitlement.toFixed(1)}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    Entitlement
-                                  </Typography>
-                                </Grid>
-                                <Grid item xs={4}>
-                                  <Typography variant="h6" color="warning.main">
-                                    {stats.taken.toFixed(1)}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    Taken
-                                  </Typography>
-                                </Grid>
-                                <Grid item xs={4}>
-                                  <Typography variant="h6" color="primary.main">
-                                    {stats.balance.toFixed(1)}
-                                  </Typography>
-                                  <Typography variant="caption" color="text.secondary">
-                                    Balance
-                                  </Typography>
-                                </Grid>
-                              </Grid>
-                              {stats.entitlement > 0 && (
-                                <Box sx={{ mt: 2 }}>
-                                  <LinearProgress
-                                    variant="determinate"
-                                    value={(stats.taken / stats.entitlement) * 100}
-                                    color="primary"
-                                    sx={{ height: 8, borderRadius: 4 }}
-                                  />
-                                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                                    {((stats.taken / stats.entitlement) * 100).toFixed(1)}% used
-                                  </Typography>
-                                </Box>
-                              )}
-                              <Typography variant="caption" color="text.secondary" sx={{ mt: stats.entitlement > 0 ? 0.5 : 2, display: 'block' }}>
-                                Unpaid: {stats.unpaid?.toFixed(1) || '0.0'} days
-                              </Typography>
-                              <Box sx={{ mt: 1, p: 1, bgcolor: 'action.hover', borderRadius: 1 }}>
-                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', fontWeight: 'bold' }}>
-                                  Anniversary Period:
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                                  {stats.periodStart.toLocaleDateString()} - {stats.periodEnd.toLocaleDateString()}
-                                </Typography>
-                              </Box>
-                            </Box>
-                          </CardContent>
-                        </Card>
-                      </Grid>
-                    );
-                  })}
-                  
-                  {/* Sick Leave Card */}
-                  {sickStats && (
-                    <Grid item xs={12} md={4} key="sick">
-                      <Card 
-                        sx={{ 
-                          height: '100%',
-                          cursor: 'pointer',
-                          border: selectedCategory === 'sick' ? 2 : 1,
-                          borderColor: selectedCategory === 'sick' ? 'secondary.main' : 'divider',
-                          '&:hover': { boxShadow: 3 }
-                        }}
-                        onClick={() => setSelectedCategory('sick')}
-                      >
-                        <CardHeader
-                          avatar={
-                            <Avatar sx={{ bgcolor: 'secondary.main' }}>
-                              <LocalHospital />
-                            </Avatar>
-                          }
-                          title="Sick Leave"
-                          action={
-                            selectedCategory === 'sick' && (
-                              <Chip label="Selected" color="secondary" size="small" />
-                            )
-                          }
-                        />
-                        <CardContent>
-                          <Box>
-                            <Grid container spacing={2} textAlign="center">
-                              <Grid item xs={4}>
-                                <Typography variant="h6" color="text.secondary">
-                                  {sickStats.entitlement.toFixed(1)}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  Entitlement
-                                </Typography>
-                              </Grid>
-                              <Grid item xs={4}>
-                                <Typography variant="h6" color="warning.main">
-                                  {sickStats.taken.toFixed(1)}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  Taken
-                                </Typography>
-                              </Grid>
-                              <Grid item xs={4}>
-                                <Typography variant="h6" color="secondary.main">
-                                  {sickStats.balance.toFixed(1)}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary">
-                                  Balance
-                                </Typography>
-                              </Grid>
-                            </Grid>
-                            {sickStats.entitlement > 0 && (
-                              <Box sx={{ mt: 2 }}>
-                                <LinearProgress
-                                  variant="determinate"
-                                  value={(sickStats.taken / sickStats.entitlement) * 100}
-                                  color="secondary"
-                                  sx={{ height: 8, borderRadius: 4 }}
-                                />
-                                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                                  {((sickStats.taken / sickStats.entitlement) * 100).toFixed(1)}% used
-                                </Typography>
-                              </Box>
-                            )}
-                            <Typography variant="caption" color="text.secondary" sx={{ mt: sickStats.entitlement > 0 ? 0.5 : 2, display: 'block' }}>
-                              Unpaid: {sickStats.unpaid?.toFixed(1) || '0.0'} days
-                            </Typography>
-                          </Box>
-                        </CardContent>
-                      </Card>
-                    </Grid>
-                  )}
-                </>
-              );
-            })()}
-          </Grid>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              {!leaveBalance && loading ? (
+                Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-36 rounded-lg" />
+                ))
+              ) : (
+                renderEntitlementCards()
+              )}
+            </div>
+          </div>
 
-          {/* Leave History */}
-      <Paper sx={{ p: 3 }}>
-            <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-              <Typography variant="h6">
-                Leave History
-                {selectedCategory !== 'all' && (
-                  <Chip 
-                    label={`${selectedCategory.charAt(0).toUpperCase() + selectedCategory.slice(1)} Only`} 
-                    size="small" 
-                    sx={{ ml: 2 }} 
-                  />
-                )}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {filteredLeaves.length} record{filteredLeaves.length !== 1 ? 's' : ''} found
-              </Typography>
-            </Box>
-
-            {filteredLeaves.length === 0 ? (
-              <Box textAlign="center" py={4}>
-                <Event sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                <Typography variant="body2" color="text.secondary">
-                  No leave records found for this category
-                </Typography>
-              </Box>
-            ) : (
-              <TableContainer>
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Leave Type</TableCell>
-                      <TableCell>Dates</TableCell>
-                      <TableCell>Days</TableCell>
-                      <TableCell>Status</TableCell>
-                      <TableCell>Reason</TableCell>
-                      <TableCell>Actions</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {filteredLeaves.map((leave) => {
-                      const leaveType = getLeaveTypeById(leave.leave_type_id);
-                      return (
-                        <TableRow key={leave.id} hover>
-                          <TableCell>
-                            <Box display="flex" alignItems="center" gap={1}>
-                              {leaveType && (
-                                <Chip
-                                  label={leaveType.code}
-                                  size="small"
-                                  color={getLeaveTypeCategory(leaveType.code) === 'vacation' ? 'primary' :
-                                         getLeaveTypeCategory(leaveType.code) === 'sick' ? 'secondary' : 'default'}
-                                />
-                              )}
-                              <Typography variant="body2">
-                                {leaveType?.name || 'Unknown'}
-                              </Typography>
-                            </Box>
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="body2">
-                              {formatDate(leave.start_date)} - {formatDate(leave.end_date)}
-                            </Typography>
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="body2" fontWeight="medium">
-                              {leave.days_requested}
-        </Typography>
-                          </TableCell>
-                          <TableCell>
-                            <Chip
-                              icon={getStatusIcon(leave.status)}
-                              label={leave.status}
-                              color={getStatusColor(leave.status) as any}
-                              size="small"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="body2" noWrap maxWidth={200}>
-                              {leave.reason || '-'}
-          </Typography>
-                          </TableCell>
-                          <TableCell>
-                            <Stack direction="row" spacing={1}>
-                              <Tooltip title="Edit">
-                                <IconButton
-                                  size="small"
-                                  onClick={() => openEditDialog(leave)}
-                                >
-                                  <Edit />
-                                </IconButton>
-                              </Tooltip>
-                              <Tooltip title="Delete">
-                                <IconButton
-                                  size="small"
-                                  color="error"
-                                  onClick={() => openDeleteDialog(leave)}
-                                >
-                                  <Delete />
-                                </IconButton>
-                              </Tooltip>
-                            </Stack>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-        )}
-      </Paper>
+          {/* Leave history */}
+          <LeaveHistoryCard
+            key={selectedEmployeeData.id}
+            leaves={filteredLeaves}
+            leaveTypes={leaveTypes}
+            category={selectedCategory}
+            loading={loading}
+            onEdit={openEditDialog}
+            onDelete={openDeleteDialog}
+          />
         </>
       ) : (
-        <Paper sx={{ p: 4, textAlign: 'center' }}>
-          <Event sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            Select an Employee
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Use the search field above to find and select an employee to view their leave information.
-          </Typography>
-        </Paper>
+        <div className="flex flex-col items-center gap-2 rounded-lg border border-solid border-border bg-card px-6 py-12 text-center">
+          <CalendarDays className="size-10 text-muted-foreground/60" aria-hidden="true" />
+          <p className="m-0 text-sm font-medium text-foreground">Select an Employee</p>
+          <p className="m-0 max-w-sm text-sm text-muted-foreground">
+            Use the search field above to find and select an employee to view their leave
+            information.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            onClick={() => searchInputRef.current?.focus()}
+          >
+            <SearchIcon />
+            Search for an employee
+          </Button>
+        </div>
       )}
 
-      {/* Add Leave Dialog */}
-      <Dialog open={addDialogOpen} onClose={() => setAddDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Add Leave Request</DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel>Leave Type</InputLabel>
-                <Select
-                  value={formData.leave_type_id}
-                  onChange={(e) => handleFormChange('leave_type_id', e.target.value)}
-                >
-                  {leaveTypes.map((type) => (
-                    <MenuItem key={type.id} value={type.id}>
-                      {type.name} ({type.code})
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Status"
-                value={formData.status}
-                onChange={(e) => handleFormChange('status', e.target.value)}
-                select
-              >
-                <MenuItem value="Active">Active</MenuItem>
-                <MenuItem value="Cancelled">Cancelled</MenuItem>
-              </TextField>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Start Date"
-                type="date"
-                value={formData.start_date}
-                onChange={(e) => handleFormChange('start_date', e.target.value)}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="End Date"
-                type="date"
-                value={formData.end_date}
-                onChange={(e) => handleFormChange('end_date', e.target.value)}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Days"
-                type="text"
-                inputMode="decimal"
-                value={daysInput}
-                onChange={(e) => handleDaysInputChange(e.target.value)}
-                inputProps={{ inputMode: 'decimal', pattern: '[0-9]*[.]?[0-9]*' }}
-                helperText="Use 0.5 for a half day"
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Reason/Note"
-                multiline
-                rows={3}
-                value={formData.reason}
-                onChange={(e) => handleFormChange('reason', e.target.value)}
-              />
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAddDialogOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleAddLeave}
-            variant="contained"
-            disabled={loading}
-          >
-            {loading ? <CircularProgress size={20} /> : 'Add Leave'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* Add / Edit leave */}
+      <LeaveFormDialog
+        open={addDialogOpen || editDialogOpen}
+        isEditing={editDialogOpen}
+        formData={formData}
+        daysInput={daysInput}
+        leaveTypes={leaveTypes}
+        loading={loading}
+        onChange={handleFormChange}
+        onDaysChange={handleDaysInputChange}
+        onClose={() => (editDialogOpen ? setEditDialogOpen(false) : setAddDialogOpen(false))}
+        onSubmit={editDialogOpen ? handleEditLeave : handleAddLeave}
+      />
 
-      {/* Edit Leave Dialog */}
-      <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Edit Leave Request</DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12} sm={6}>
-              <FormControl fullWidth>
-                <InputLabel>Leave Type</InputLabel>
-                <Select
-                  value={formData.leave_type_id}
-                  onChange={(e) => handleFormChange('leave_type_id', e.target.value)}
-                >
-                  {leaveTypes.map((type) => (
-                    <MenuItem key={type.id} value={type.id}>
-                      {type.name} ({type.code})
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Status"
-                value={formData.status}
-                onChange={(e) => handleFormChange('status', e.target.value)}
-                select
-              >
-                <MenuItem value="Active">Active</MenuItem>
-                <MenuItem value="Cancelled">Cancelled</MenuItem>
-              </TextField>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Start Date"
-                type="date"
-                value={formData.start_date}
-                onChange={(e) => handleFormChange('start_date', e.target.value)}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="End Date"
-                type="date"
-                value={formData.end_date}
-                onChange={(e) => handleFormChange('end_date', e.target.value)}
-                InputLabelProps={{ shrink: true }}
-              />
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField
-                fullWidth
-                label="Days"
-                type="text"
-                inputMode="decimal"
-                value={daysInput}
-                onChange={(e) => handleDaysInputChange(e.target.value)}
-                inputProps={{ inputMode: 'decimal', pattern: '[0-9]*[.]?[0-9]*' }}
-                helperText="Use 0.5 for a half day"
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <TextField
-                fullWidth
-                label="Reason/Note"
-                multiline
-                rows={3}
-                value={formData.reason}
-                onChange={(e) => handleFormChange('reason', e.target.value)}
-              />
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleEditLeave}
-            variant="contained"
-            disabled={loading}
-          >
-            {loading ? <CircularProgress size={20} /> : 'Update Leave'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>Delete Leave Request</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to delete this leave request? This action cannot be undone.
-          </Typography>
+      {/* Delete confirmation */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Leave Request</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this leave request? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
           {selectedLeave && (
-            <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
-              <Typography variant="body2">
-                <strong>Leave ID:</strong> {selectedLeave.id}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Dates:</strong> {formatDate(selectedLeave.start_date)} - {formatDate(selectedLeave.end_date)}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Days:</strong> {selectedLeave.days_requested}
-              </Typography>
-              <Typography variant="body2">
-                <strong>Status:</strong> {selectedLeave.status}
-              </Typography>
-            </Box>
+            <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 rounded-md bg-muted px-3 py-2 text-sm">
+              <dt className="text-muted-foreground">Leave ID</dt>
+              <dd className="m-0 font-medium tabular-nums">{selectedLeave.id}</dd>
+              <dt className="text-muted-foreground">Dates</dt>
+              <dd className="m-0 font-medium tabular-nums">
+                {formatDate(selectedLeave.start_date)} - {formatDate(selectedLeave.end_date)}
+              </dd>
+              <dt className="text-muted-foreground">Days</dt>
+              <dd className="m-0 font-medium tabular-nums">{selectedLeave.days_requested}</dd>
+              <dt className="text-muted-foreground">Status</dt>
+              <dd className="m-0 font-medium">{selectedLeave.status}</dd>
+            </dl>
           )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-          <Button
-            onClick={handleDeleteLeave}
-            color="error"
-            variant="contained"
-            disabled={loading}
-          >
-            {loading ? <CircularProgress size={20} /> : 'Delete'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Upload Dialog */}
-      <Dialog open={uploadDialogOpen} onClose={resetUploadDialog} maxWidth="lg" fullWidth>
-        <DialogTitle>Upload Leave Data</DialogTitle>
-        <DialogContent>
-          <Box sx={{ mt: 2 }}>
-            {/* File Selection */}
-            <Box sx={{ mb: 3 }}>
-              <Typography variant="h6" gutterBottom>
-                Select Excel File
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                <input
-                  type="file"
-                  accept=".xlsx,.xls"
-                  onChange={handleFileSelect}
-                  style={{ display: 'none' }}
-                  id="file-upload"
-                />
-                <label htmlFor="file-upload">
-                  <Button
-                    variant="outlined"
-                    component="span"
-                    startIcon={<CloudUploadIcon />}
-                    disabled={uploadLoading || previewLoading}
-                  >
-                    Choose File
-                  </Button>
-                </label>
-                {selectedFile && (
-                  <Typography variant="body2" color="text.secondary">
-                    {selectedFile.name}
-                  </Typography>
-                )}
-                <Button
-                  variant="outlined"
-                  startIcon={<DownloadIcon />}
-                  onClick={downloadTemplate}
-                  disabled={uploadLoading || previewLoading}
-                >
-                  Download Template
-                </Button>
-              </Box>
-            </Box>
-
-            {/* Preview Section */}
-            {selectedFile && (
-              <Box sx={{ mb: 3 }}>
-                <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', mb: 2 }}>
-                  <Button
-                    variant="contained"
-                    startIcon={<PreviewIcon />}
-                    onClick={previewUpload}
-                    disabled={!selectedFile || previewLoading || uploadLoading}
-                  >
-                    {previewLoading ? <CircularProgress size={20} /> : 'Preview'}
-                  </Button>
-                  {previewData && (
-                    <Typography variant="body2" color="text.secondary">
-                      {previewData.valid_rows} valid, {previewData.invalid_rows} invalid, {previewData.duplicate_rows} duplicates
-                    </Typography>
-                  )}
-                </Box>
-
-                {/* Preview Results */}
-                {previewData && (
-                  <Box sx={{ mb: 3 }}>
-                    <Typography variant="h6" gutterBottom>
-                      Preview Results
-                    </Typography>
-                    <TableContainer component={Paper} sx={{ maxHeight: 300 }}>
-                      <Table stickyHeader>
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Row</TableCell>
-                            <TableCell>Employee ID</TableCell>
-                            <TableCell>Leave Type</TableCell>
-                            <TableCell>Start Date</TableCell>
-                            <TableCell>End Date</TableCell>
-                            <TableCell>Days</TableCell>
-                            <TableCell>Status</TableCell>
-                            <TableCell>Will Import</TableCell>
-                            <TableCell>Error</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {previewData.rows.map((row) => (
-                            <TableRow key={row.row_number}>
-                              <TableCell>{row.row_number}</TableCell>
-                              <TableCell>{row.employee_id}</TableCell>
-                              <TableCell>{row.leave_type_id}</TableCell>
-                              <TableCell>{row.start_date}</TableCell>
-                              <TableCell>{row.end_date}</TableCell>
-                              <TableCell>{row.days}</TableCell>
-                              <TableCell>{row.status}</TableCell>
-                              <TableCell>
-                                <Chip
-                                  label={row.will_import ? 'Yes' : 'No'}
-                                  color={row.will_import ? 'success' : 'error'}
-                                  size="small"
-                                />
-                              </TableCell>
-                              <TableCell>
-                                {row.error_message && (
-                                  <Typography variant="caption" color="error">
-                                    {row.error_message}
-                                  </Typography>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </Box>
-                )}
-              </Box>
-            )}
-
-            {/* Upload Results */}
-            {uploadResult && (
-              <Box sx={{ mb: 3 }}>
-                <Typography variant="h6" gutterBottom>
-                  Upload Results
-                </Typography>
-                <Grid container spacing={2} sx={{ mb: 2 }}>
-                  <Grid item xs={4}>
-                    <Card sx={{ textAlign: 'center', bgcolor: 'success.light', color: 'success.contrastText' }}>
-                      <CardContent>
-                        <Typography variant="h4">{uploadResult.success_count}</Typography>
-                        <Typography variant="body2">Successfully Imported</Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid item xs={4}>
-                    <Card sx={{ textAlign: 'center', bgcolor: 'warning.light', color: 'warning.contrastText' }}>
-                      <CardContent>
-                        <Typography variant="h4">{uploadResult.skipped_count}</Typography>
-                        <Typography variant="body2">Skipped</Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                  <Grid item xs={4}>
-                    <Card sx={{ textAlign: 'center', bgcolor: 'error.light', color: 'error.contrastText' }}>
-                      <CardContent>
-                        <Typography variant="h4">{uploadResult.error_count}</Typography>
-                        <Typography variant="body2">Errors</Typography>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                </Grid>
-
-                {/* Error Details */}
-                {uploadResult.errors.length > 0 && (
-                  <Box>
-                    <Typography variant="h6" gutterBottom>
-                      Error Details
-                    </Typography>
-                    <TableContainer component={Paper} sx={{ maxHeight: 200 }}>
-                      <Table size="small">
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Row</TableCell>
-                            <TableCell>Error Message</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {uploadResult.errors.map((error, index) => (
-                            <TableRow key={index}>
-                              <TableCell>{error.row_number}</TableCell>
-                              <TableCell>
-                                <Typography variant="caption" color="error">
-                                  {error.error_message}
-                                </Typography>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                  </Box>
-                )}
-              </Box>
-            )}
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={resetUploadDialog}>
-            {uploadResult ? 'Close' : 'Cancel'}
-          </Button>
-          {previewData && !uploadResult && (
-            <Button
-              onClick={executeUpload}
-              variant="contained"
-              disabled={uploadLoading || previewData.valid_rows === 0}
-            >
-              {uploadLoading ? <CircularProgress size={20} /> : 'Import'}
-            </Button>
-          )}
-        </DialogActions>
-      </Dialog>
-
-      {/* Payroll EmplDetl import */}
-      <Dialog open={payrollImportOpen} onClose={() => setPayrollImportOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Import Payroll Details (EmplDetl)</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ mb: 2 }}>
-            Upload an EmplDetl Excel export. Same Import button supports both:
-            <br />• <strong>All staff after one payroll</strong> (e.g. EmplDetl_QWP.xlsx) — many employees, one cheque each
-            <br />• <strong>One staff, many pay periods</strong> (e.g. EmplDetl_Harjit.xlsx) — one employee, multiple cheques / YTD
-          </Typography>
-          <Button variant="outlined" component="label" sx={{ mb: 2 }}>
-            Choose Excel file
-            <input
-              type="file"
-              hidden
-              accept=".xlsx,.xls"
-              onChange={(e) => {
-                setPayrollFile(e.target.files?.[0] || null);
-                setPayrollPreview(null);
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={loading}
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteLeave();
               }}
-            />
-          </Button>
-          {payrollFile && (
-            <Typography variant="body2" sx={{ mb: 1 }}>
-              Selected: {payrollFile.name}
-            </Typography>
-          )}
-                    {payrollPreview && (
-            <Box sx={{ mt: 2 }}>
-              <Alert
-                severity={
-                  payrollPreview.can_import
-                    ? payrollPreview.summary?.unmatched || payrollPreview.summary?.ambiguous
-                      ? 'warning'
-                      : 'success'
-                    : 'error'
-                }
-                sx={{ mb: 1 }}
-              >
-                {payrollPreview.report_kind === 'single_employee_multi_pay'
-                  ? 'Detected: one employee, multiple pay lines. '
-                  : payrollPreview.report_kind === 'all_staff_single_pay'
-                    ? 'Detected: all-staff single payroll. '
-                    : ''}
-                Matched {payrollPreview.summary?.matched}/{payrollPreview.summary?.total}. Unmatched:{' '}
-                {payrollPreview.summary?.unmatched}, Ambiguous: {payrollPreview.summary?.ambiguous}.
-                {payrollPreview.can_import &&
-                (payrollPreview.summary?.unmatched || payrollPreview.summary?.ambiguous)
-                  ? ' Import will save matched rows only (overwrites existing); fix unmatched names and re-upload later.'
-                  : ''}
-              </Alert>
-              <TableContainer component={Paper} sx={{ maxHeight: 280 }}>
-                <Table size="small" stickyHeader>
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Name</TableCell>
-                      <TableCell>Match</TableCell>
-                      <TableCell>Employee</TableCell>
-                      <TableCell>Payroll Date</TableCell>
-                      <TableCell>Cheque</TableCell>
-                      <TableCell>Gross</TableCell>
-                      <TableCell>Benefits</TableCell>
-                      <TableCell>Vac Paid</TableCell>
-                      <TableCell>Vac Earned</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {(payrollPreview.rows || []).slice(0, 50).map((r: any, i: number) => (
-                      <TableRow key={i}>
-                        <TableCell>{r.employee_name}</TableCell>
-                        <TableCell>{r.match_status}</TableCell>
-                        <TableCell>{r.matched_name || r.employee_id || '—'}</TableCell>
-                        <TableCell>{r.pay_date || '—'}</TableCell>
-                        <TableCell>{r.cheque_no || '—'}</TableCell>
-                        <TableCell>{r.gross}</TableCell>
-                        <TableCell>{r.benefits ?? 0}</TableCell>
-                        <TableCell>{r.vacation_paid}</TableCell>
-                        <TableCell>{r.vacation_earned}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setPayrollImportOpen(false)}>Cancel</Button>
-          <Button onClick={previewPayrollImport} disabled={!payrollFile || payrollLoading}>
-            Preview
-          </Button>
-          <Button
-            variant="contained"
-            onClick={commitPayrollImport}
-            disabled={!payrollPreview?.can_import || payrollLoading}
-          >
-            {payrollLoading ? <CircularProgress size={20} /> : 'Import'}
-          </Button>
-        </DialogActions>
-      </Dialog>
+            >
+              {loading && <Loader2 className="animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-      {/* Vacation dollar opening */}
-      <Dialog open={openingDialogOpen} onClose={() => setOpeningDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Vacation $ Opening Balance</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ mb: 2 }}>
-            Brought-forward vacation dollar balance as of Jan 1 for the selected employee/company.
-          </Typography>
-          <TextField
-            fullWidth
-            label="Year"
-            type="number"
-            value={openingYear}
-            onChange={async (e) => {
-              const yr = Number(e.target.value);
-              setOpeningYear(yr);
-              await loadOpeningBalance(selectedEmployee, selectedCompanyId || undefined, yr);
-            }}
-            sx={{ mb: 2 }}
-          />
-          <TextField
-            fullWidth
-            label="Opening amount ($)"
-            type="number"
-            value={openingAmount}
-            onChange={(e) => setOpeningAmount(e.target.value)}
-            inputProps={{ step: 0.01 }}
-            helperText={
-              openingAmount !== ''
-                ? `Current saved / entered value for ${openingYear}`
-                : `No opening saved yet for ${openingYear}`
-            }
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpeningDialogOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={saveOpeningBalance}>
-            Save
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <LeaveUploadDialog
+        open={uploadDialogOpen}
+        selectedFile={selectedFile}
+        previewData={previewData}
+        uploadResult={uploadResult}
+        previewLoading={previewLoading}
+        uploadLoading={uploadLoading}
+        onFileSelect={handleFileSelect}
+        onDownloadTemplate={downloadTemplate}
+        onPreview={previewUpload}
+        onImport={executeUpload}
+        onClose={resetUploadDialog}
+      />
 
-      {/* Snackbars */}
-      <Snackbar
-        open={!!error}
-        autoHideDuration={6000}
-        onClose={() => setError(null)}
-        message={error}
+      <PayrollImportDialog
+        open={payrollImportOpen}
+        file={payrollFile}
+        preview={payrollPreview}
+        loading={payrollLoading}
+        onFileChange={(file) => {
+          setPayrollFile(file);
+          setPayrollPreview(null);
+        }}
+        onPreview={previewPayrollImport}
+        onImport={commitPayrollImport}
+        onClose={() => setPayrollImportOpen(false)}
       />
-      <Snackbar
-        open={!!success}
-        autoHideDuration={6000}
-        onClose={() => setSuccess(null)}
-        message={success}
+
+      <OpeningBalanceDialog
+        open={openingDialogOpen}
+        year={openingYear}
+        amount={openingAmount}
+        onYearChange={async (yr) => {
+          setOpeningYear(yr);
+          await loadOpeningBalance(selectedEmployee, selectedCompanyId || undefined, yr);
+        }}
+        onAmountChange={setOpeningAmount}
+        onSave={saveOpeningBalance}
+        onClose={() => setOpeningDialogOpen(false)}
       />
-    </Box>
+
+      <AppToast message={error} variant="error" onClose={clearError} />
+      <AppToast message={success} variant="success" onClose={clearSuccess} />
+    </div>
   );
 };
 

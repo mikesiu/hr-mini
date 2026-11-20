@@ -1,7 +1,32 @@
 {
-  "version": "1.1.0",
-  "release_date": "2026-10-15",
+  "version": "2.1.0",
+  "release_date": "2026-11-20",
   "history": [
+    {
+      "version": "2.1.0",
+      "date": "2026-11-20",
+      "changes": [
+        "Work Permit Management redesigned as an overview registry: Valid / Expiring Soon / Expired summary cards, searchable table of current permits with days remaining, and a detail panel with full permit history and Renew, Edit and Delete",
+        "Add Work Permit is always available and lets you pick the employee in the form; permits now also record permit number, issue date and notes",
+        "Leave Dashboard, Work Schedules, Attendance, Termination and HR Reports pages rebuilt on the new design (HR Reports is now a two-pane report studio)",
+        "Administration pages (Company, Payroll Periods, Holidays, Users, Code Maintenance, About) share one consistent layout with search, filters, record counts and confirmation dialogs",
+        "Code Maintenance: choose the code list from a dropdown, ready for more lists to be added",
+        "Left menu sub-sections start collapsed after sign-in"
+      ]
+    },
+    {
+      "version": "2.0.0",
+      "date": "2026-11-19",
+      "changes": [
+        "New user interface: the app is rebuilt on shadcn/ui and Tailwind CSS, with a refreshed look across the login page, dashboard and navigation",
+        "Collapsible left sidebar with grouped sections: Overview, People & Lifecycle, Time, Pay & Claims, Reports and Administration (Ctrl+B to collapse)",
+        "Payroll Dashboard: legend filters, two-month calendar view and event tooltips; company filter moved to the top bar",
+        "Reports (HR Reports, Audit Report) now have their own menu section; Payroll Periods moved to Administration",
+        "Session timeout: the sign-in token now lasts 45 minutes so the 'Session Expiring Soon' warning can always extend the session; the idle logout is still 30 minutes",
+        "Session warning dialog redesigned",
+        "Faster startup and builds (moved from Create React App to Vite)"
+      ]
+    },
     {
       "version": "1.1.0",
       "date": "2026-10-15",

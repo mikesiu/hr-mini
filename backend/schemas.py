@@ -540,6 +540,9 @@ class WorkPermitBase(BaseModel):
     employee_id: str = Field(..., max_length=50)
     permit_type: str = Field(..., max_length=100)
     expiry_date: date
+    permit_number: Optional[str] = Field(None, max_length=100)
+    issue_date: Optional[date] = None
+    notes: Optional[str] = None
 
 class WorkPermitCreate(WorkPermitBase):
     # Date the previous permit was closed. Used only when this employee already has an active permit.
@@ -549,6 +552,9 @@ class WorkPermitUpdate(BaseModel):
     permit_type: Optional[str] = Field(None, max_length=100)
     expiry_date: Optional[date] = None
     renewed_date: Optional[date] = None
+    permit_number: Optional[str] = Field(None, max_length=100)
+    issue_date: Optional[date] = None
+    notes: Optional[str] = None
 
 class WorkPermitResponse(WorkPermitBase):
     id: int
@@ -558,6 +564,26 @@ class WorkPermitResponse(WorkPermitBase):
     
     class Config:
         from_attributes = True
+
+class WorkPermitCurrentResponse(BaseModel):
+    """Current (open) work permit joined with basic employee and company info."""
+    id: int
+    employee_id: str
+    employee_code: str
+    full_name: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    company_id: Optional[str] = None
+    company_code: Optional[str] = None
+    company_name: Optional[str] = None
+    permit_type: str
+    permit_number: Optional[str] = None
+    issue_date: Optional[date] = None
+    expiry_date: date
+    status: str = "active"
+    notes: Optional[str] = None
+    days_remaining: int
+    permit_status: str  # valid | expiring_soon | expired
 
 # Employee Upload schemas
 class EmployeeUploadError(BaseModel):

@@ -1,921 +1,490 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Box,
-  Typography,
-  Button,
-  TextField,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
-  Paper,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Chip,
-  Alert,
-  Grid,
-  Card,
-  CardContent,
-  CardActions,
-  IconButton,
-  Tabs,
-  Tab,
-  List,
-  ListItem,
-  ListItemText,
-  Divider,
-  Snackbar,
-  Avatar,
-  useTheme,
-} from '@mui/material';
-import {
-  Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  Search as SearchIcon,
-  Warning as WarningIcon,
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
-  Person as PersonIcon,
-  Email as EmailIcon,
-  Phone as PhoneIcon,
-} from '@mui/icons-material';
-// import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-// import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
-// import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
-import { workPermitAPI, apiClient } from '../api/client';
-import { useCompanyFilter } from '../hooks/useCompanyFilter';
-import { useSelectedEmployee } from '../contexts/SelectedEmployeeContext';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { FileBadge, Plus, RefreshCw, Search, X } from 'lucide-react';
+import { apiClient, workPermitAPI } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import { useCompanyFilter } from '../hooks/useCompanyFilter';
+import AppToast from '../components/AppToast';
+import PermitKpiStrip from '../components/workpermit/PermitKpiStrip';
+import PermitRegistryTable from '../components/workpermit/PermitRegistryTable';
+import WorkPermitDetailSheet from '../components/workpermit/WorkPermitDetailSheet';
+import WorkPermitFormDialog from '../components/workpermit/WorkPermitFormDialog';
+import { isRenewedPermit, todayString } from '../components/workpermit/workPermitTypes';
+import type {
+  CurrentPermit, PermitFormData, PermitStatus, PickerEmployee, WorkPermit,
+} from '../components/workpermit/workPermitTypes';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 
-interface WorkPermit {
-  id: number;
-  employee_id: string;
-  permit_type: string;
-  expiry_date: string;
-  status?: string;
-  renewed_date?: string | null;
-  employee?: {
-    id: string;
-    first_name: string;
-    last_name: string;
-    full_name: string;
+const ALL_STATUS = '__all__';
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const emptyForm = (): PermitFormData => {
+  const oneYear = new Date();
+  oneYear.setFullYear(oneYear.getFullYear() + 1);
+  const expiry = `${oneYear.getFullYear()}-${String(oneYear.getMonth() + 1).padStart(2, '0')}-${String(oneYear.getDate()).padStart(2, '0')}`;
+  return {
+    employee_id: '',
+    permit_type: '',
+    permit_number: '',
+    issue_date: '',
+    expiry_date: expiry,
+    renewed_date: todayString(),
+    notes: '',
   };
-}
+};
 
-interface Employee {
-  id: string;
-  first_name: string;
-  last_name: string;
-  full_name: string;
-  email?: string;
-  phone?: string;
-  status: string;
-}
-
-interface TabPanelProps {
-  children?: React.ReactNode;
-  index: number;
-  value: number;
-}
-
-function TabPanel(props: TabPanelProps) {
-  const { children, value, index, ...other } = props;
-
-  return (
-    <div
-      role="tabpanel"
-      hidden={value !== index}
-      id={`work-permit-tabpanel-${index}`}
-      aria-labelledby={`work-permit-tab-${index}`}
-      {...other}
-    >
-      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
-    </div>
-  );
-}
-
-// Helper function to format date string (YYYY-MM-DD) without timezone issues
-function todayString(): string {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function formatDateString(dateStr: string): string {
-  if (!dateStr) return '';
-  // Parse YYYY-MM-DD format directly to avoid timezone conversion
-  if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-    const [year, month, day] = dateStr.split('-').map(Number);
-    const date = new Date(year, month - 1, day); // month is 0-indexed
-    return date.toLocaleDateString();
-  }
-  // Otherwise, try parsing as Date but use local components
-  try {
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return '';
-    // Use local date components to avoid timezone shift
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const day = date.getDate();
-    return new Date(year, month, day).toLocaleDateString();
-  } catch {
-    return dateStr;
-  }
-}
+const validYear = (d: string) => {
+  const y = parseInt(d.slice(0, 4), 10);
+  return y >= 1900 && y <= 2200;
+};
 
 const WorkPermitPage: React.FC = () => {
-  const theme = useTheme();
-  const { selectedCompanyId, getCompanyName } = useCompanyFilter();
-  const { selectedEmployee: globalSelectedEmployee, setSelectedEmployee: setGlobalSelectedEmployee } = useSelectedEmployee();
   const { hasPermission } = useAuth();
+  const { selectedCompanyId, getCompanyName } = useCompanyFilter();
+  const canManage = hasPermission('work_permit:manage');
 
-  // State management
-  const [workPermits, setWorkPermits] = useState<WorkPermit[]>([]);
-  const [expiringPermits, setExpiringPermits] = useState<WorkPermit[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [permits, setPermits] = useState<CurrentPermit[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
-  // Form state
-  const [selectedEmployee, setSelectedEmployee] = useState<string>('');
-  const [selectedEmployeeData, setSelectedEmployeeData] = useState<Employee | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState<Employee[]>([]);
-  const [currentTab, setCurrentTab] = useState(0);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<PermitStatus | null>(null);
+
+  const [viewEmployeeId, setViewEmployeeId] = useState<string | null>(null);
+  const [historyKey, setHistoryKey] = useState(0);
+
+  const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null);
+  const [formData, setFormData] = useState<PermitFormData>(emptyForm);
+  const [lockedEmployee, setLockedEmployee] = useState<{ id: string; name: string } | null>(null);
   const [editingPermit, setEditingPermit] = useState<WorkPermit | null>(null);
-  const [formData, setFormData] = useState({
-    permit_type: '',
-    expiry_date: '',
-    renewed_date: '',
-  });
+  const [saving, setSaving] = useState(false);
+  const [employees, setEmployees] = useState<PickerEmployee[]>([]);
+  const [employeesLoading, setEmployeesLoading] = useState(false);
 
-  // Dialog state
-  const [permitDialogOpen, setPermitDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [permitToDelete, setPermitToDelete] = useState<WorkPermit | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
-  // Permit type options
-  const permitTypeOptions = [
-    'Open Work Permit',
-    'Closed Work Permit',
-    'Student Work Permit',
-    'Post-Graduation Work Permit',
-    'Temporary Foreign Worker Permit',
-    'Other',
-  ];
+  const closeError = useCallback(() => setError(''), []);
+  const closeSuccess = useCallback(() => setSuccess(''), []);
 
-  // Load data
-  const loadWorkPermits = useCallback(async () => {
+  const loadPermits = useCallback(async () => {
     try {
       setLoading(true);
-      setError(null);
-      
-      // If searching, show search results instead of work permit records
-      if (searchTerm) {
-        // Search for employees matching the search term
-        const employeeResponse = await apiClient.get('/employees/list', {
-          params: { q: searchTerm, company_id: selectedCompanyId || undefined }
-        });
-        setSearchResults(employeeResponse.data?.data || []);
-        setWorkPermits([]); // Don't show work permit records yet
-        setLoading(false);
-        return;
-      } else {
-        // Only filter by employee if no search term is provided
-        const employeeToFilter = globalSelectedEmployee?.id || selectedEmployee;
-        
-        if (employeeToFilter) {
-          const response = await workPermitAPI.getByEmployee(employeeToFilter);
-          setWorkPermits(response.data);
-        } else {
-          // Load all work permits if no employee selected
-          const response = await workPermitAPI.list();
-          setWorkPermits(response.data);
-        }
-      }
+      const res = await workPermitAPI.listCurrent({
+        company_id: selectedCompanyId || undefined,
+      });
+      setPermits(Array.isArray(res.data) ? res.data : []);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load work permits');
+      setPermits([]);
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, selectedEmployee, globalSelectedEmployee?.id, selectedCompanyId]);
+  }, [selectedCompanyId]);
 
-  const loadExpiringPermits = useCallback(async () => {
+  useEffect(() => {
+    loadPermits();
+  }, [loadPermits]);
+
+  const loadEmployees = useCallback(async () => {
     try {
-      const response = await workPermitAPI.getExpiring(30);
-      setExpiringPermits(response.data);
+      setEmployeesLoading(true);
+      const res = await apiClient.get('/employees/list', {
+        params: { company_id: selectedCompanyId || undefined },
+      });
+      const list: PickerEmployee[] = res.data?.data || [];
+      setEmployees(list.filter((e) => e.status !== 'Terminated'));
     } catch (err: any) {
-      console.error('Error loading expiring permits:', err);
+      setEmployees([]);
+      setError(err.response?.data?.detail || 'Failed to load employees');
+    } finally {
+      setEmployeesLoading(false);
     }
-  }, []);
+  }, [selectedCompanyId]);
 
-  // Search functionality - using LeavePage pattern
-  const handleSearch = () => {
-    loadWorkPermits();
-  };
-
-  const handleSearchResultClick = async (employee: Employee) => {
-    // Set the global selected employee first
-    setGlobalSelectedEmployee({
-      id: employee.id,
-      first_name: employee.first_name,
-      last_name: employee.last_name,
-      full_name: employee.full_name,
-      email: employee.email,
-      phone: employee.phone,
-      status: employee.status,
+  const counts = useMemo(() => {
+    const c: Record<PermitStatus, number> = { valid: 0, expiring_soon: 0, expired: 0 };
+    permits.forEach((p) => {
+      c[p.permit_status] += 1;
     });
-    
-    // Then set local state
-    setSelectedEmployee(employee.id);
-    setSelectedEmployeeData(employee);
-    setSearchTerm('');
-    setSearchResults([]);
+    return c;
+  }, [permits]);
+
+  const visible = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return permits
+      .filter((p) => !statusFilter || p.permit_status === statusFilter)
+      .filter(
+        (p) =>
+          !q ||
+          p.full_name.toLowerCase().includes(q) ||
+          p.employee_code.toLowerCase().includes(q) ||
+          (p.permit_number || '').toLowerCase().includes(q)
+      )
+      .sort((a, b) => a.days_remaining - b.days_remaining);
+  }, [permits, search, statusFilter]);
+
+  const hasFilters = !!search.trim() || !!statusFilter;
+  const clearFilters = () => {
+    setSearch('');
+    setStatusFilter(null);
   };
 
+  const viewRow = useMemo(
+    () => permits.find((p) => p.employee_id === viewEmployeeId) ?? null,
+    [permits, viewEmployeeId]
+  );
+
+  // Close the detail sheet if the employee no longer has a current permit.
   useEffect(() => {
-    loadExpiringPermits();
-  }, [loadExpiringPermits]);
+    if (viewEmployeeId && !loading && !viewRow) setViewEmployeeId(null);
+  }, [viewEmployeeId, viewRow, loading]);
 
-  // Auto-select employee from global context when component mounts
-  useEffect(() => {
-    if (globalSelectedEmployee && !selectedEmployee) {
-      setSelectedEmployee(globalSelectedEmployee.id);
-      setSelectedEmployeeData(globalSelectedEmployee);
-    }
-  }, [globalSelectedEmployee, selectedEmployee]);
+  const refreshAll = async () => {
+    await loadPermits();
+    setHistoryKey((k) => k + 1);
+  };
 
-  // Load data when dependencies change
-  useEffect(() => {
-    // Only load if we have a search term or selected employee
-    if (searchTerm || selectedEmployee || globalSelectedEmployee?.id) {
-      loadWorkPermits();
-    }
-  }, [searchTerm, selectedEmployee, globalSelectedEmployee?.id, loadWorkPermits]);
+  // ---- Add / renew / edit ----
+  const openCreate = (locked: CurrentPermit | null = null) => {
+    setEditingPermit(null);
+    setLockedEmployee(locked ? { id: locked.employee_id, name: locked.full_name } : null);
+    setFormData({
+      ...emptyForm(),
+      employee_id: locked?.employee_id ?? '',
+      permit_type: locked?.permit_type ?? '',
+    });
+    setFormMode('create');
+    if (!locked) loadEmployees();
+  };
 
-  // Get work permits for selected employee
-  const employeePermits = selectedEmployee 
-    ? workPermits.filter(permit => permit.employee_id === selectedEmployee)
-    : [];
+  const openEdit = (permit: WorkPermit, row: CurrentPermit) => {
+    setEditingPermit(permit);
+    setLockedEmployee({ id: row.employee_id, name: row.full_name });
+    setFormData({
+      employee_id: permit.employee_id,
+      permit_type: permit.permit_type,
+      permit_number: permit.permit_number || '',
+      issue_date: permit.issue_date ? permit.issue_date.split('T')[0] : '',
+      expiry_date: permit.expiry_date.split('T')[0],
+      renewed_date: permit.renewed_date ? permit.renewed_date.split('T')[0] : todayString(),
+      notes: permit.notes || '',
+    });
+    setFormMode('edit');
+  };
 
-  const isRenewedPermit = (permit: WorkPermit) =>
-    permit.status === 'renewed' || Boolean(permit.renewed_date);
+  const closeForm = () => {
+    if (saving) return;
+    setFormMode(null);
+    setEditingPermit(null);
+    setLockedEmployee(null);
+  };
 
-  // Current permit is the open one. A renewal closes the previous record.
-  const activePermits = employeePermits.filter((permit) => !isRenewedPermit(permit));
-  const currentPermit = activePermits.length > 0
-    ? [...activePermits].sort((a, b) => b.id - a.id)[0]
+  const currentForPicked = useMemo(
+    () => (formMode === 'create' ? permits.find((p) => p.employee_id === formData.employee_id) : undefined),
+    [formMode, permits, formData.employee_id]
+  );
+  const closingPrevious = currentForPicked
+    ? { permit_type: currentForPicked.permit_type, expiry_date: currentForPicked.expiry_date }
     : null;
+  const editingRenewed = formMode === 'edit' && !!editingPermit && isRenewedPermit(editingPermit);
 
-  // Calculate days until expiry
-  const getDaysUntilExpiry = (expiryDate: string) => {
-    if (!expiryDate) return 0;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0); // Reset to midnight for accurate day calculation
-    
-    // Parse date safely
-    let expiry: Date;
-    if (expiryDate.match(/^\d{4}-\d{2}-\d{2}$/)) {
-      // Parse YYYY-MM-DD format directly
-      const [year, month, day] = expiryDate.split('-').map(Number);
-      expiry = new Date(year, month - 1, day);
-    } else {
-      expiry = new Date(expiryDate);
-      if (isNaN(expiry.getTime())) return 0;
-      // Use local date components to avoid timezone issues
-      const year = expiry.getFullYear();
-      const month = expiry.getMonth();
-      const day = expiry.getDate();
-      expiry = new Date(year, month, day);
+  const handleSubmit = async () => {
+    const f = formData;
+    if (formMode === 'create' && !f.employee_id) return setError('Please select an employee');
+    if (!f.permit_type) return setError('Please select a permit type');
+    if (!f.expiry_date) return setError('Please enter an expiry date');
+    if (!DATE_RE.test(f.expiry_date) || !validYear(f.expiry_date)) {
+      return setError('Invalid expiry date. Use a valid date between the years 1900 and 2200.');
     }
-    expiry.setHours(0, 0, 0, 0); // Reset to midnight for accurate day calculation
-    
-    const diffTime = expiry.getTime() - today.getTime();
-    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  };
-
-  // Get status chip for permit
-  const getStatusChip = (permit: WorkPermit) => {
-    if (isRenewedPermit(permit)) {
-      const when = permit.renewed_date ? formatDateString(permit.renewed_date) : '';
-      return (
-        <Chip
-          label={when ? `Closed · Renewed ${when}` : 'Closed · Renewed'}
-          size="small"
-          variant="outlined"
-        />
+    if (f.issue_date && (!DATE_RE.test(f.issue_date) || !validYear(f.issue_date))) {
+      return setError('Invalid issue date. Use a valid date between the years 1900 and 2200.');
+    }
+    if (f.issue_date && f.issue_date > f.expiry_date) {
+      return setError('Issue date must be on or before the expiry date');
+    }
+    if ((closingPrevious || editingRenewed) && !f.renewed_date) {
+      return setError(
+        editingRenewed
+          ? 'Please enter the date this permit was closed / renewed'
+          : 'Please enter the date the previous permit was closed'
       );
     }
-
-    const days = getDaysUntilExpiry(permit.expiry_date);
-    
-    if (days < 0) {
-      return <Chip icon={<ErrorIcon />} label={`EXPIRED (${Math.abs(days)} days ago)`} color="error" size="small" />;
-    } else if (days <= 30) {
-      return <Chip icon={<WarningIcon />} label={`Expires in ${days} days`} color="warning" size="small" />;
-    } else {
-      return <Chip icon={<CheckCircleIcon />} label={`Valid for ${days} more days`} color="success" size="small" />;
-    }
-  };
-
-  // Handle form submission
-  const handleSubmit = async () => {
-    if (!selectedEmployee) return;
-
-    // Validate YYYY-MM-DD from the native date input (keep as string to avoid year typing bugs)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(formData.expiry_date)) {
-      setError('Please select a valid expiry date');
-      return;
-    }
-    const [year, month, day] = formData.expiry_date.split('-').map(Number);
-    if (year < 1900 || year > 2200 || month < 1 || month > 12 || day < 1 || day > 31) {
-      setError('Please select a valid expiry date');
-      return;
-    }
-    const closingPrevious = !editingPermit && Boolean(currentPermit);
-    const editingRenewed = Boolean(editingPermit && isRenewedPermit(editingPermit));
-    if ((closingPrevious || editingRenewed) && !/^\d{4}-\d{2}-\d{2}$/.test(formData.renewed_date)) {
-      setError('Please select the date the previous permit was renewed');
-      return;
+    if ((closingPrevious || editingRenewed) && (!DATE_RE.test(f.renewed_date) || !validYear(f.renewed_date))) {
+      return setError('Invalid closed date. Use a valid date between the years 1900 and 2200.');
     }
 
     try {
-      setLoading(true);
-      setError(null);
-
-      if (editingPermit) {
-        const updateData: {
-          permit_type: string;
-          expiry_date: string;
-          renewed_date?: string;
-        } = {
-          permit_type: formData.permit_type,
-          expiry_date: formData.expiry_date,
+      setSaving(true);
+      setError('');
+      if (formMode === 'edit' && editingPermit) {
+        const update: Record<string, any> = {
+          permit_type: f.permit_type,
+          expiry_date: f.expiry_date,
+          permit_number: f.permit_number.trim(),
+          notes: f.notes.trim(),
         };
-        if (editingRenewed) {
-          updateData.renewed_date = formData.renewed_date;
-        }
-        await workPermitAPI.update(editingPermit.id, updateData);
-        setSuccessMessage('Work permit updated successfully!');
+        if (f.issue_date) update.issue_date = f.issue_date;
+        if (editingRenewed) update.renewed_date = f.renewed_date;
+        await workPermitAPI.update(editingPermit.id, update);
+        setSuccess('Work permit updated successfully!');
       } else {
-        const permitData: {
-          employee_id: string;
-          permit_type: string;
-          expiry_date: string;
-          renewed_date?: string;
-        } = {
-          employee_id: selectedEmployee,
-          permit_type: formData.permit_type,
-          expiry_date: formData.expiry_date,
+        const payload: Record<string, any> = {
+          employee_id: f.employee_id,
+          permit_type: f.permit_type,
+          expiry_date: f.expiry_date,
         };
-        if (closingPrevious) {
-          permitData.renewed_date = formData.renewed_date;
-        }
-        await workPermitAPI.create(permitData);
-        setSuccessMessage(
+        if (f.permit_number.trim()) payload.permit_number = f.permit_number.trim();
+        if (f.issue_date) payload.issue_date = f.issue_date;
+        if (f.notes.trim()) payload.notes = f.notes.trim();
+        if (closingPrevious) payload.renewed_date = f.renewed_date;
+        await workPermitAPI.create(payload);
+        setSuccess(
           closingPrevious
             ? 'Work permit renewed. The previous permit is closed.'
             : 'Work permit added successfully!'
         );
       }
-
-      setPermitDialogOpen(false);
+      setFormMode(null);
       setEditingPermit(null);
-      setFormData({ permit_type: '', expiry_date: '', renewed_date: '' });
-      loadWorkPermits();
+      setLockedEmployee(null);
+      await refreshAll();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to save work permit');
+      const detail = err.response?.data?.detail;
+      setError(
+        typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((d: any) => d.msg).join('; ')
+            : 'Failed to save work permit'
+      );
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  // Handle delete
   const handleDelete = async () => {
     if (!permitToDelete) return;
-
     try {
-      setLoading(true);
-      setError(null);
-
+      setDeleting(true);
       await workPermitAPI.delete(permitToDelete.id);
-      setSuccessMessage('Work permit deleted successfully!');
-      setDeleteDialogOpen(false);
+      setSuccess('Work permit deleted successfully!');
       setPermitToDelete(null);
-      loadWorkPermits();
+      await refreshAll();
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to delete work permit');
+      setPermitToDelete(null);
     } finally {
-      setLoading(false);
+      setDeleting(false);
     }
   };
 
-  // Handle edit
-  const handleEdit = (permit: WorkPermit) => {
-    setEditingPermit(permit);
-    // Keep as YYYY-MM-DD string — do not convert through Date while editing
-    const raw = permit.expiry_date || '';
-    const dateStr = raw.includes('T') ? raw.split('T')[0] : raw.slice(0, 10);
-    const renewedRaw = permit.renewed_date || '';
-    const renewedStr = renewedRaw.includes('T') ? renewedRaw.split('T')[0] : renewedRaw.slice(0, 10);
-    setFormData({
-      permit_type: permit.permit_type,
-      expiry_date: /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : '',
-      renewed_date: /^\d{4}-\d{2}-\d{2}$/.test(renewedStr) ? renewedStr : '',
-    });
-    setPermitDialogOpen(true);
-  };
-
-  // Handle add new
-  const handleAddNew = () => {
-    setEditingPermit(null);
-    const oneYear = new Date();
-    oneYear.setFullYear(oneYear.getFullYear() + 1);
-    const year = oneYear.getFullYear();
-    const month = String(oneYear.getMonth() + 1).padStart(2, '0');
-    const day = String(oneYear.getDate()).padStart(2, '0');
-    setFormData({
-      permit_type: '',
-      expiry_date: `${year}-${month}-${day}`,
-      renewed_date: todayString(),
-    });
-    setPermitDialogOpen(true);
-  };
-
-  // Check permissions
-  if (!hasPermission('work_permit:manage')) {
+  if (!canManage) {
     return (
-      <Box>
-        <Typography variant="h4" gutterBottom>
-          Work Permit Management
-        </Typography>
-        <Alert severity="error">
-          Permission 'work_permit:manage' required to access Work Permit Management.
+      <div className="p-6">
+        <Alert variant="destructive">
+          <AlertDescription>You do not have permission to manage work permits.</AlertDescription>
         </Alert>
-      </Box>
+      </div>
     );
   }
 
+  const renderBody = () => {
+    if (loading) {
+      return (
+        <div className="space-y-2 p-4">
+          <Skeleton className="h-9 w-full" />
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full" />
+          ))}
+        </div>
+      );
+    }
+    if (visible.length === 0) {
+      return (
+        <div className="flex flex-col items-center gap-2 px-6 py-16 text-center">
+          <FileBadge className="size-8 text-muted-foreground" />
+          <p className="m-0 text-sm font-medium text-foreground">No work permits found</p>
+          <p className="m-0 text-sm text-muted-foreground">
+            {hasFilters
+              ? 'No current permits match your search or status filter.'
+              : selectedCompanyId
+                ? `No employees at ${getCompanyName()} have a work permit on file yet.`
+                : 'Add a work permit to start tracking expiry dates and renewals.'}
+          </p>
+          {hasFilters ? (
+            <Button variant="outline" className="mt-2" onClick={clearFilters}>
+              <X className="size-4" /> Clear filters
+            </Button>
+          ) : (
+            <Button className="mt-2 rounded-md" onClick={() => openCreate()}>
+              <Plus className="size-4" /> Add Work Permit
+            </Button>
+          )}
+        </div>
+      );
+    }
+    return <PermitRegistryTable rows={visible} onView={(r) => setViewEmployeeId(r.employee_id)} />;
+  };
+
   return (
-    <Box>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-          <Typography variant="h4" gutterBottom>
+    <div className="space-y-4 p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="m-0 text-2xl font-semibold tracking-tight text-foreground">
             Work Permit Management
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={handleAddNew}
-            disabled={!selectedEmployee}
-          >
-            {currentPermit ? 'Renew Work Permit' : 'Add Work Permit'}
-          </Button>
-        </Box>
+          </h1>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">
+            Track active employee work permits, expiration timelines, and renewal history
+          </p>
+        </div>
+        <Button className="rounded-md" onClick={() => openCreate()}>
+          <Plus className="size-4" /> Add Work Permit
+        </Button>
+      </div>
 
-        {/* Company Filter Status */}
-        {selectedCompanyId && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            🔍 Filtered by Company: {getCompanyName()}
-          </Alert>
-        )}
+      <PermitKpiStrip
+        loading={loading}
+        counts={counts}
+        active={statusFilter}
+        onSelect={setStatusFilter}
+      />
 
-        {/* Employee Search */}
-        <Paper
-          sx={{
-            p: 3,
-            mb: 3,
-            background: `linear-gradient(135deg, ${theme.palette.primary.main}15 0%, ${theme.palette.secondary.main}15 100%)`,
-            border: `1px solid ${theme.palette.primary.main}30`,
-            borderRadius: 3,
-          }}
-        >
-          <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-            <TextField
-              label="Search Employee"
-              variant="outlined"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-              sx={{ 
-                minWidth: 250,
-                '& .MuiOutlinedInput-root': {
-                  backgroundColor: 'background.paper',
-                }
-              }}
-              placeholder="Search by name, ID, email..."
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-solid border-border bg-card p-3">
+        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
+          <div className="relative w-full sm:w-96">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by employee name, ID, or permit number..."
+              className="px-8"
+              aria-label="Search work permits"
             />
-            <Button
-              variant="contained"
-              startIcon={<SearchIcon />}
-              onClick={handleSearch}
-              disabled={loading}
-              sx={{
-                px: 3,
-                py: 1.5,
-                fontWeight: 600,
-                textTransform: 'none',
-                borderRadius: 2,
+            {search && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setSearch('')}
+                className="absolute top-1/2 right-2 flex size-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                <X className="size-4" />
+              </button>
+            )}
+          </div>
+          <Select
+            value={statusFilter || ALL_STATUS}
+            onValueChange={(v) => setStatusFilter(v === ALL_STATUS ? null : (v as PermitStatus))}
+          >
+            <SelectTrigger className="w-full sm:w-[180px]" aria-label="Status filter">
+              <SelectValue placeholder="All Current" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_STATUS}>All Current</SelectItem>
+              <SelectItem value="valid">Valid</SelectItem>
+              <SelectItem value="expiring_soon">Expiring Soon</SelectItem>
+              <SelectItem value="expired">Expired</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          {selectedCompanyId && (
+            <Badge variant="outline" className="max-w-[240px]">
+              <span className="truncate">{getCompanyName()}</span>
+            </Badge>
+          )}
+          <Badge variant="secondary" className="tabular-nums">
+            {visible.length} {visible.length === 1 ? 'permit' : 'permits'}
+          </Badge>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                aria-label="Refresh"
+                onClick={loadPermits}
+                disabled={loading}
+              >
+                <RefreshCw className={cn('size-4', loading && 'animate-spin')} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Refresh</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-solid border-border bg-card">
+        {renderBody()}
+      </div>
+
+      <WorkPermitDetailSheet
+        row={viewRow}
+        refreshKey={historyKey}
+        canManage={canManage}
+        onClose={() => setViewEmployeeId(null)}
+        onRenew={(row) => openCreate(row)}
+        onEdit={openEdit}
+        onDelete={setPermitToDelete}
+      />
+
+      <WorkPermitFormDialog
+        open={formMode !== null}
+        mode={formMode ?? 'create'}
+        formData={formData}
+        employees={employees}
+        employeesLoading={employeesLoading}
+        lockedEmployee={lockedEmployee}
+        closingPrevious={closingPrevious}
+        editingRenewed={editingRenewed}
+        saving={saving}
+        onChange={(patch) => setFormData((f) => ({ ...f, ...patch }))}
+        onClose={closeForm}
+        onSubmit={handleSubmit}
+      />
+
+      <AlertDialog open={!!permitToDelete} onOpenChange={(o) => !o && !deleting && setPermitToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete work permit?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the {permitToDelete?.permit_type} record
+              {permitToDelete ? ` expiring ${permitToDelete.expiry_date.split('T')[0]}` : ''}. This
+              action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleting}
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={(e) => {
+                e.preventDefault();
+                handleDelete();
               }}
             >
-              Search
-            </Button>
-            <Button
-              variant="outlined"
-              onClick={() => {
-                setSearchTerm('');
-                setSearchResults([]);
-                setSelectedEmployee('');
-                setSelectedEmployeeData(null);
-                setGlobalSelectedEmployee(null);
-                loadWorkPermits();
-              }}
-              disabled={loading}
-              sx={{
-                px: 3,
-                py: 1.5,
-                fontWeight: 500,
-                textTransform: 'none',
-                borderRadius: 2,
-              }}
-            >
-              Clear
-            </Button>
-          </Box>
-        </Paper>
+              {deleting ? 'Deleting…' : 'Delete'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-        {/* Search Results */}
-        <Box sx={{ mt: 3 }}>
-          {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
-              <Typography>Loading employees...</Typography>
-            </Box>
-          ) : searchResults.length === 0 && searchTerm ? (
-            <Paper sx={{ p: 4, textAlign: 'center' }}>
-              <Typography variant="h6" color="text.secondary">
-                No employees found
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                Try adjusting your search criteria.
-              </Typography>
-            </Paper>
-          ) : searchResults.length > 0 ? (
-            <Grid container spacing={3}>
-              {searchResults.map((employee) => (
-                <Grid item xs={12} sm={6} md={4} key={employee.id}>
-                  <Card
-                    sx={{
-                      cursor: 'pointer',
-                      transition: 'all 0.3s ease',
-                      '&:hover': {
-                        transform: 'translateY(-4px)',
-                        boxShadow: theme.shadows[3],
-                        borderColor: theme.palette.primary.main,
-                      },
-                    }}
-                    onClick={() => handleSearchResultClick(employee)}
-                  >
-                    <CardContent sx={{ flexGrow: 1, pb: 1 }}>
-                      {/* Header with Avatar */}
-                      <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 2 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                          <Avatar
-                            sx={{
-                              bgcolor: theme.palette.primary.main,
-                              width: 48,
-                              height: 48,
-                            }}
-                          >
-                            <PersonIcon />
-                          </Avatar>
-                          <Box>
-                            <Typography variant="h6" sx={{ fontWeight: 600, mb: 0.5 }}>
-                              {employee.full_name}
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary">
-                              ID: {employee.id}
-                            </Typography>
-                          </Box>
-                        </Box>
-                      </Box>
-                      
-                      {/* Employee Details */}
-                      <Box sx={{ mt: 2 }}>
-                        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                          Status: <Chip label={employee.status} size="small" color="primary" />
-                        </Typography>
-                        {employee.email && (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
-                            <EmailIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                            <Typography variant="body2" color="text.secondary">
-                              {employee.email}
-                            </Typography>
-                          </Box>
-                        )}
-                        {employee.phone && (
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            <PhoneIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-                            <Typography variant="body2" color="text.secondary">
-                              {employee.phone}
-                            </Typography>
-                          </Box>
-                        )}
-                      </Box>
-                    </CardContent>
-                  </Card>
-                </Grid>
-              ))}
-            </Grid>
-          ) : null}
-        </Box>
-
-        {/* Selected Employee Info */}
-        {selectedEmployeeData ? (
-          <Card sx={{ mb: 3 }}>
-            <CardContent>
-              <Box display="flex" alignItems="center" justifyContent="space-between">
-                <Box display="flex" alignItems="center" gap={2}>
-                  <Avatar sx={{ bgcolor: 'primary.main' }}>
-                    <PersonIcon />
-                  </Avatar>
-                  <Box>
-                    <Typography variant="h6">
-                      {selectedEmployeeData.full_name}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      ID: {selectedEmployeeData.id} • {selectedEmployeeData.status}
-                    </Typography>
-                  </Box>
-                </Box>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => {
-                    setSearchTerm('');
-                    setSearchResults([]);
-                    setSelectedEmployee('');
-                    setSelectedEmployeeData(null);
-                    setGlobalSelectedEmployee(null);
-                    loadWorkPermits();
-                  }}
-                >
-                  Change Employee
-                </Button>
-              </Box>
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {/* Main Content */}
-        {selectedEmployeeData ? (
-          <Box>
-            <Tabs value={currentTab} onChange={(_, newValue) => setCurrentTab(newValue)}>
-              <Tab label="Current Work Permit" />
-              <Tab label="Work Permit History" />
-              <Tab label="System Alerts" />
-            </Tabs>
-
-            {/* Current Work Permit Tab */}
-            <TabPanel value={currentTab} index={0}>
-              {currentPermit ? (
-                <Card>
-                  <CardContent>
-                    <Grid container spacing={2}>
-                      <Grid item xs={12} md={6}>
-                        <Typography variant="h6" gutterBottom>
-                          {currentPermit.permit_type}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Expiry Date: {formatDateString(currentPermit.expiry_date)}
-                        </Typography>
-                      </Grid>
-                      <Grid item xs={12} md={6}>
-                        <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
-                          {getStatusChip(currentPermit)}
-                        </Box>
-                      </Grid>
-                    </Grid>
-                  </CardContent>
-                  <CardActions>
-                    <Button
-                      startIcon={<EditIcon />}
-                      onClick={() => handleEdit(currentPermit)}
-                    >
-                      Edit Permit
-                    </Button>
-                    <Button
-                      startIcon={<DeleteIcon />}
-                      color="error"
-                      onClick={() => {
-                        setPermitToDelete(currentPermit);
-                        setDeleteDialogOpen(true);
-                      }}
-                    >
-                      Delete Permit
-                    </Button>
-                  </CardActions>
-                </Card>
-              ) : (
-                <Alert severity="info">
-                  No work permit found for this employee.
-                </Alert>
-              )}
-            </TabPanel>
-
-            {/* Work Permit History Tab */}
-            <TabPanel value={currentTab} index={1}>
-              {employeePermits.length > 0 ? (
-                <List>
-                  {employeePermits.map((permit) => (
-                    <React.Fragment key={permit.id}>
-                      <ListItem>
-                        <ListItemText
-                          primary={permit.permit_type}
-                          secondary={
-                            isRenewedPermit(permit)
-                              ? `Renewed: ${formatDateString(permit.renewed_date || '')} · Expires: ${formatDateString(permit.expiry_date)}`
-                              : `Expires: ${formatDateString(permit.expiry_date)}`
-                          }
-                        />
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          {getStatusChip(permit)}
-                          <IconButton
-                            onClick={() => handleEdit(permit)}
-                            size="small"
-                          >
-                            <EditIcon />
-                          </IconButton>
-                          <IconButton
-                            onClick={() => {
-                              setPermitToDelete(permit);
-                              setDeleteDialogOpen(true);
-                            }}
-                            size="small"
-                            color="error"
-                          >
-                            <DeleteIcon />
-                          </IconButton>
-                        </Box>
-                      </ListItem>
-                      <Divider />
-                    </React.Fragment>
-                  ))}
-                </List>
-              ) : (
-                <Alert severity="info">
-                  No work permit history found for this employee.
-                </Alert>
-              )}
-            </TabPanel>
-
-            {/* System Alerts Tab */}
-            <TabPanel value={currentTab} index={2}>
-              {expiringPermits.length > 0 ? (
-                <Alert severity="warning" sx={{ mb: 2 }}>
-                  ⚠️ {expiringPermits.length} work permit(s) expiring in the next 30 days
-                </Alert>
-              ) : (
-                <Alert severity="success">
-                  ✅ No work permits expiring in the next 30 days
-                </Alert>
-              )}
-              
-              {expiringPermits.map((permit) => (
-                <Card key={permit.id} sx={{ mb: 1 }}>
-                  <CardContent>
-                    <Typography variant="body1">
-                      [{permit.employee_id}] {permit.employee?.full_name} - {permit.permit_type}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Expires in {getDaysUntilExpiry(permit.expiry_date)} days
-                    </Typography>
-                  </CardContent>
-                </Card>
-              ))}
-            </TabPanel>
-          </Box>
-        ) : (
-          <Alert severity="info">
-            Please select an employee to manage work permits.
-          </Alert>
-        )}
-
-        {/* Add/Edit Work Permit Dialog */}
-        <Dialog open={permitDialogOpen} onClose={() => setPermitDialogOpen(false)} maxWidth="sm" fullWidth>
-          <DialogTitle>
-            {editingPermit ? 'Edit Work Permit' : currentPermit ? 'Renew Work Permit' : 'Add Work Permit'}
-          </DialogTitle>
-          <DialogContent>
-            <Box sx={{ pt: 1 }}>
-              <FormControl fullWidth sx={{ mb: 2 }}>
-                <InputLabel>Work Permit Type</InputLabel>
-                <Select
-                  value={formData.permit_type}
-                  onChange={(e) => setFormData({ ...formData, permit_type: e.target.value })}
-                  label="Work Permit Type"
-                >
-                  {permitTypeOptions.map((type) => (
-                    <MenuItem key={type} value={type}>
-                      {type}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              
-              <TextField
-                label="Expiry Date"
-                type="date"
-                value={formData.expiry_date}
-                onChange={(e) => {
-                  // Keep raw YYYY-MM-DD string. Converting through Date() while typing
-                  // maps years 0-99 to 19xx (e.g. 7 -> 1907) when entering 2027.
-                  setFormData({ ...formData, expiry_date: e.target.value });
-                }}
-                InputLabelProps={{ shrink: true }}
-                inputProps={{ min: '1900-01-01', max: '2200-12-31' }}
-                fullWidth
-                sx={{ mb: 2 }}
-              />
-
-              {!editingPermit && currentPermit && (
-                <TextField
-                  label="Date previous permit renewed"
-                  type="date"
-                  value={formData.renewed_date}
-                  onChange={(e) => setFormData({ ...formData, renewed_date: e.target.value })}
-                  helperText={`Closes the current ${currentPermit.permit_type} (expires ${formatDateString(currentPermit.expiry_date)}).`}
-                  InputLabelProps={{ shrink: true }}
-                  inputProps={{ min: '1900-01-01', max: '2200-12-31' }}
-                  fullWidth
-                />
-              )}
-
-              {editingPermit && isRenewedPermit(editingPermit) && (
-                <TextField
-                  label="Date renewed"
-                  type="date"
-                  value={formData.renewed_date}
-                  onChange={(e) => setFormData({ ...formData, renewed_date: e.target.value })}
-                  InputLabelProps={{ shrink: true }}
-                  inputProps={{ min: '1900-01-01', max: '2200-12-31' }}
-                  fullWidth
-                />
-              )}
-            </Box>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setPermitDialogOpen(false)}>Cancel</Button>
-            <Button
-              onClick={handleSubmit}
-              variant="contained"
-              disabled={!formData.permit_type || loading}
-            >
-              {editingPermit ? 'Update' : currentPermit ? 'Renew' : 'Add'} Work Permit
-            </Button>
-          </DialogActions>
-        </Dialog>
-
-        {/* Delete Confirmation Dialog */}
-        <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-          <DialogTitle>Delete Work Permit</DialogTitle>
-          <DialogContent>
-            <Typography>
-              Are you sure you want to delete this work permit? This action cannot be undone.
-            </Typography>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleDelete} color="error" variant="contained" disabled={loading}>
-              Delete
-            </Button>
-          </DialogActions>
-        </Dialog>
-
-        {/* Error/Success Messages */}
-        <Snackbar
-          open={!!error}
-          autoHideDuration={6000}
-          onClose={() => setError(null)}
-        >
-          <Alert onClose={() => setError(null)} severity="error">
-            {error}
-          </Alert>
-        </Snackbar>
-
-        <Snackbar
-          open={!!successMessage}
-          autoHideDuration={6000}
-          onClose={() => setSuccessMessage(null)}
-        >
-          <Alert onClose={() => setSuccessMessage(null)} severity="success">
-            {successMessage}
-          </Alert>
-        </Snackbar>
-      </Box>
+      <AppToast message={error || null} variant="error" onClose={closeError} />
+      <AppToast message={success || null} variant="success" onClose={closeSuccess} autoHideMs={3000} />
+    </div>
   );
 };
 

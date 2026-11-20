@@ -1,5 +1,5 @@
 # app/models/work_permit.py
-from sqlalchemy import Column, String, Date, Integer, ForeignKey
+from sqlalchemy import Column, String, Date, Integer, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from models.base import Base
 
@@ -13,6 +13,9 @@ class WorkPermit(Base):
     # active = current permit; renewed = replaced by a later permit
     status = Column(String(20), nullable=False, default="active", server_default="active")
     renewed_date = Column(Date, nullable=True)
+    permit_number = Column(String(100), nullable=True)  # permit / document number
+    issue_date = Column(Date, nullable=True)
+    notes = Column(Text, nullable=True)
 
     # noload: avoid DetachedInstanceError after session closes unless joinedload() is used
     employee = relationship("models.employee.Employee", lazy="noload")

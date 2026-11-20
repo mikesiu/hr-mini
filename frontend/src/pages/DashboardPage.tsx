@@ -1,48 +1,37 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  Box,
-  Typography,
-  Paper,
-  Grid,
-  Alert,
-  CircularProgress,
-  Snackbar,
-  Chip,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Button,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  Divider,
-  FormControl,
-  InputLabel,
-  Select,
-  MenuItem,
-} from '@mui/material';
-import {
-  AttachMoney as PayrollIcon,
-  AccountBalance as CRAIcon,
-  Groups as UnionIcon,
-  CalendarToday as CalendarIcon,
-  Person as PersonIcon,
-  Assignment as WorkPermitIcon,
-} from '@mui/icons-material';
+import { RefreshCw, AlertCircle, CalendarX } from 'lucide-react';
 import { format, startOfMonth, addMonths } from 'date-fns';
 import { dashboardAPI, holidayAPI } from '../api/client';
 import { useCompanyFilter } from '../hooks/useCompanyFilter';
 import PayrollCalendar from '../components/dashboard/PayrollCalendar';
-
-interface PayrollEvent {
-  date: string;
-  company_id: string;
-  company_name: string;
-  event_type: 'payroll' | 'cra' | 'union' | 'holiday' | 'probation' | 'work_permit';
-  description: string;
-}
+import {
+  EVENT_META,
+  EVENT_TYPES,
+  type PayrollEvent,
+  type PayrollEventType,
+} from '../components/dashboard/payrollEventMeta';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Separator } from '@/components/ui/separator';
+import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
 
 const DashboardPage: React.FC = () => {
   const { selectedCompanyId, companies, setSelectedCompanyId, loading: companiesLoading } = useCompanyFilter();
@@ -52,7 +41,6 @@ const DashboardPage: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [selectedEvents, setSelectedEvents] = useState<PayrollEvent[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
   
   // Month/Year selection state
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
@@ -203,43 +191,8 @@ const DashboardPage: React.FC = () => {
     setSelectedEvents([]);
   };
 
-  const getEventIcon = (eventType: string) => {
-    switch (eventType) {
-      case 'payroll':
-        return <PayrollIcon />;
-      case 'cra':
-        return <CRAIcon />;
-      case 'union':
-        return <UnionIcon />;
-      case 'holiday':
-        return <CalendarIcon />;
-      case 'probation':
-        return <PersonIcon />;
-      case 'work_permit':
-        return <WorkPermitIcon />;
-      default:
-        return <CalendarIcon />;
-    }
-  };
-
-  const getEventColor = (eventType: string) => {
-    switch (eventType) {
-      case 'payroll':
-        return 'primary';
-      case 'cra':
-        return 'warning';
-      case 'union':
-        return 'success';
-      case 'holiday':
-        return 'secondary'; // Use secondary (pink/magenta) for better distinction from blue payroll
-      case 'probation':
-        return 'info'; // Use info (cyan/blue) for probation reminders
-      case 'work_permit':
-        return 'error';
-      default:
-        return 'default';
-    }
-  };
+  // Legend filter: event types the user has toggled off on the calendar
+  const [hiddenTypes, setHiddenTypes] = useState<Set<PayrollEventType>>(new Set());
 
   // Filter events for each month
   const currentMonthEvents = events.filter(event => {
@@ -257,251 +210,225 @@ const DashboardPage: React.FC = () => {
     return eventDate >= nextMonth && eventDate < nextMonthEnd;
   });
 
-  // Show loading only if we're actively loading calendar data
-  // Don't block on companiesLoading - allow dashboard to show even if companies failed
-  if (loading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
+  const toggleEventType = (type: PayrollEventType) => {
+    setHiddenTypes((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  };
 
-  if (error) {
-    return (
-      <Box>
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-        <Button variant="contained" onClick={fetchPayrollCalendar}>
-          Retry
-        </Button>
-      </Box>
-    );
-  }
+  // Legend filter: hidden event types are removed from both calendars
+  const visibleCurrentMonthEvents = currentMonthEvents.filter((e) => !hiddenTypes.has(e.event_type));
+  const visibleNextMonthEvents = nextMonthEvents.filter((e) => !hiddenTypes.has(e.event_type));
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4" gutterBottom>
+    <div className="flex flex-col gap-5">
+      {/* Page header */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="m-0 text-2xl font-semibold tracking-tight text-foreground">
           Payroll Dashboard
-        </Typography>
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel>Month</InputLabel>
-            <Select
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(Number(e.target.value))}
-              label="Month"
-            >
+        </h1>
+        <div className="flex items-center gap-2">
+          <Select value={String(selectedMonth)} onValueChange={(v) => setSelectedMonth(Number(v))}>
+            <SelectTrigger size="sm" className="w-36 bg-background" aria-label="Month">
+              <SelectValue placeholder="Month" />
+            </SelectTrigger>
+            <SelectContent>
               {Array.from({ length: 12 }, (_, i) => (
-                <MenuItem key={i} value={i}>
+                <SelectItem key={i} value={String(i)}>
                   {format(new Date(2024, i, 1), 'MMMM')}
-                </MenuItem>
+                </SelectItem>
               ))}
-            </Select>
-          </FormControl>
-          
-          <FormControl size="small" sx={{ minWidth: 100 }}>
-            <InputLabel>Year</InputLabel>
-            <Select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(Number(e.target.value))}
-              label="Year"
-            >
+            </SelectContent>
+          </Select>
+
+          <Select value={String(selectedYear)} onValueChange={(v) => setSelectedYear(Number(v))}>
+            <SelectTrigger size="sm" className="w-24 bg-background" aria-label="Year">
+              <SelectValue placeholder="Year" />
+            </SelectTrigger>
+            <SelectContent>
               {Array.from({ length: 5 }, (_, i) => {
                 const year = new Date().getFullYear() - 2 + i;
                 return (
-                  <MenuItem key={year} value={year}>
+                  <SelectItem key={year} value={String(year)}>
                     {year}
-                  </MenuItem>
+                  </SelectItem>
                 );
               })}
-            </Select>
-          </FormControl>
-          
-          <Button variant="outlined" onClick={fetchPayrollCalendar}>
+            </SelectContent>
+          </Select>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="bg-background"
+            onClick={fetchPayrollCalendar}
+            disabled={loading}
+          >
+            <RefreshCw className={cn(loading && 'animate-spin')} />
             Refresh
           </Button>
-        </Box>
-      </Box>
+        </div>
+      </div>
 
-      {/* Company Filter */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          Company Filter
-        </Typography>
-        {companiesLoading ? (
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <CircularProgress size={20} />
-            <Typography variant="body2">Loading companies...</Typography>
-          </Box>
-        ) : (
-          <>
-            <FormControl size="small" sx={{ minWidth: 200 }}>
-              <InputLabel>Company</InputLabel>
-              <Select
-                value={selectedCompanyId || 'all'}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setSelectedCompanyId(value === 'all' ? null : value);
-                }}
-                label="Company"
-              >
-                <MenuItem value="all">All Companies</MenuItem>
-                {companies.map((company) => (
-                  <MenuItem key={company.id} value={company.id}>
-                    {company.legal_name || company.id}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              {selectedCompanyId 
-                ? `Showing events for: ${companies.find(c => c.id === selectedCompanyId)?.legal_name || selectedCompanyId}`
-                : 'Showing events for all companies'}
-            </Typography>
-            {companies.length === 0 && !companiesLoading && (
-              <Alert severity="warning" sx={{ mt: 1 }}>
-                No companies available. Please check if companies exist in the system.
-              </Alert>
-            )}
-          </>
-        )}
-      </Paper>
-      {/* Legend */}
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
+      {/* Legend toolbar: pills double as event-type filters */}
+      <div
+        className="box-border flex items-center gap-2 overflow-x-auto rounded-lg border border-solid border-border bg-card px-3 py-2"
+        role="group"
+        aria-label="Filter calendar events by type"
+      >
+        <span className="shrink-0 text-xs font-medium tracking-wide text-muted-foreground uppercase">
           Legend
-        </Typography>
-        <Grid container spacing={2}>
-          <Grid item>
-            <Chip
-              icon={<PayrollIcon />}
-              label="Payroll Due"
-              color="primary"
-              variant="outlined"
-            />
-          </Grid>
-          <Grid item>
-            <Chip
-              icon={<CRAIcon />}
-              label="CRA Payment Due"
-              color="warning"
-              variant="outlined"
-            />
-          </Grid>
-          <Grid item>
-            <Chip
-              icon={<UnionIcon />}
-              label="Union Payment Due"
-              color="success"
-              variant="outlined"
-            />
-          </Grid>
-          <Grid item>
-            <Chip
-              icon={<CalendarIcon />}
-              label="Holiday"
-              color="secondary"
-              variant="outlined"
-            />
-          </Grid>
-          <Grid item>
-            <Chip
-              icon={<PersonIcon />}
-              label="Probation End Date"
-              color="info"
-              variant="outlined"
-            />
-          </Grid>
-          <Grid item>
-            <Chip
-              icon={<WorkPermitIcon />}
-              label="Work Permit Expiry"
-              color="error"
-              variant="outlined"
-            />
-          </Grid>
-        </Grid>
-      </Paper>
+        </span>
+        <Separator orientation="vertical" className="h-5" />
+        {EVENT_TYPES.map((type) => {
+          const meta = EVENT_META[type];
+          const Icon = meta.icon;
+          const active = !hiddenTypes.has(type);
+          return (
+            <button
+              key={type}
+              type="button"
+              aria-pressed={active}
+              onClick={() => toggleEventType(type)}
+              title={active ? `Hide ${meta.legendLabel}` : `Show ${meta.legendLabel}`}
+              className={cn(
+                'box-border inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-solid px-2.5 py-1 text-xs font-medium whitespace-nowrap [font-family:inherit] transition-colors outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+                active
+                  ? cn('border-transparent', meta.tint)
+                  : 'border-border bg-transparent text-muted-foreground line-through hover:bg-accent'
+              )}
+            >
+              <Icon className="size-3.5" />
+              {meta.legendLabel}
+            </button>
+          );
+        })}
+        {hiddenTypes.size > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="ml-auto h-7 shrink-0 px-2 text-xs"
+            onClick={() => setHiddenTypes(new Set())}
+          >
+            Show all
+          </Button>
+        )}
+      </div>
 
-      {/* Calendar Grid */}
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={6}>
+      {/* Calendar grid */}
+      {loading ? (
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2" aria-busy="true" aria-label="Loading calendar">
+          {[0, 1].map((i) => (
+            <Card key={i} className="gap-4 py-5">
+              <CardHeader className="items-center px-5">
+                <Skeleton className="h-6 w-40" />
+              </CardHeader>
+              <CardContent className="px-5">
+                <div className="mb-2 grid grid-cols-7 gap-2">
+                  {Array.from({ length: 7 }, (_, d) => (
+                    <Skeleton key={d} className="mx-auto h-4 w-8" />
+                  ))}
+                </div>
+                <div className="grid grid-cols-7 gap-1">
+                  {Array.from({ length: 42 }, (_, d) => (
+                    <Skeleton key={d} className="h-[96px] w-full rounded-md" />
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : error ? (
+        <Alert variant="destructive" className="border-destructive/30 bg-destructive/5">
+          <AlertCircle />
+          <AlertDescription className="flex flex-wrap items-center gap-3">
+            <span>{error}</span>
+            <Button size="sm" onClick={fetchPayrollCalendar}>
+              Retry
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
           <PayrollCalendar
             month={currentMonth}
-            events={currentMonthEvents}
+            events={visibleCurrentMonthEvents}
             onDateClick={handleDateClick}
           />
-        </Grid>
-        <Grid item xs={12} md={6}>
           <PayrollCalendar
             month={nextMonth}
-            events={nextMonthEvents}
+            events={visibleNextMonthEvents}
             onDateClick={handleDateClick}
           />
-        </Grid>
-      </Grid>
+        </div>
+      )}
 
       {/* Event Details Dialog */}
-      <Dialog open={dialogOpen} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          Events for {selectedDate && format(selectedDate, 'MMMM d, yyyy')}
-        </DialogTitle>
-        <DialogContent>
-          {selectedEvents.length === 0 ? (
-            <Typography color="text.secondary">No events for this date.</Typography>
-          ) : (
-            <List>
-              {selectedEvents.map((event, index) => (
-                <React.Fragment key={index}>
-                  <ListItem>
-                    <ListItemIcon>
-                      {getEventIcon(event.event_type)}
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                          <Chip
-                            label={event.event_type === 'work_permit' ? 'WORK PERMIT' : event.event_type.toUpperCase()}
-                            color={getEventColor(event.event_type) as any}
-                            size="small"
-                          />
-                          <Typography variant="subtitle1">
-                            {event.company_name}
-                          </Typography>
-                        </Box>
-                      }
-                      secondary={event.description}
-                    />
-                  </ListItem>
-                  {index < selectedEvents.length - 1 && <Divider />}
-                </React.Fragment>
-              ))}
-            </List>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleCloseDialog}>Close</Button>
-        </DialogActions>
-      </Dialog>
+      <Dialog open={dialogOpen} onOpenChange={(open) => !open && handleCloseDialog()}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              Events for {selectedDate && format(selectedDate, 'MMMM d, yyyy')}
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              Payroll, payment, holiday and expiry events on this date.
+            </DialogDescription>
+          </DialogHeader>
 
-      {/* Snackbar for notifications */}
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={6000}
-        onClose={() => setSnackbar({ ...snackbar, open: false })}
-      >
-        <Alert
-          onClose={() => setSnackbar({ ...snackbar, open: false })}
-          severity={snackbar.severity}
-          sx={{ width: '100%' }}
-        >
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
-    </Box>
+          {selectedEvents.length === 0 ? (
+            <div className="flex flex-col items-center gap-2 py-8 text-center text-muted-foreground">
+              <CalendarX className="size-8" />
+              <p className="m-0 text-sm">No events for this date.</p>
+            </div>
+          ) : (
+            <ul className="m-0 flex max-h-[60vh] list-none flex-col overflow-y-auto p-0">
+              {selectedEvents.map((event, index) => {
+                const meta = EVENT_META[event.event_type];
+                const Icon = meta.icon;
+                return (
+                  <li key={index}>
+                    {index > 0 && <Separator />}
+                    <div className="flex items-start gap-3 py-3">
+                      <span
+                        className={cn(
+                          'mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-full',
+                          meta.tint
+                        )}
+                      >
+                        <Icon className="size-4" />
+                      </span>
+                      <div className="flex min-w-0 flex-col gap-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge className={cn('border-transparent', meta.tint)}>
+                            {meta.dialogLabel}
+                          </Badge>
+                          <span className="text-sm font-medium text-foreground">
+                            {event.company_name}
+                          </span>
+                        </div>
+                        <p className="m-0 text-sm text-muted-foreground">{event.description}</p>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCloseDialog}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 };
 

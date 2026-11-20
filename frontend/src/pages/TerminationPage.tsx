@@ -1,75 +1,38 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Box,
-  Typography,
-  Button,
-  TextField,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
-  Paper,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  Alert,
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableRow,
-  TableContainer,
-  IconButton,
-  Autocomplete,
-  CircularProgress,
-  Chip,
-  Grid,
-} from '@mui/material';
-import {
-  Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  Search as SearchIcon,
-  Visibility as VisibilityIcon,
-} from '@mui/icons-material';
+import { Eye, Pencil, Plus, RefreshCw, Search, Trash2, UserMinus, X } from 'lucide-react';
 import { terminationAPI, employeeAPI } from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import AppToast from '../components/AppToast';
+import TerminationFormDialog from '../components/termination/TerminationFormDialog';
+import TerminationViewDialog from '../components/termination/TerminationViewDialog';
+import {
+  ROE_REASON_CODES, getRoeBadgeClass, getRoeLabel,
+} from '../components/termination/terminationTypes';
+import type { Employee, Termination } from '../components/termination/terminationTypes';
+import { getInitials } from '../components/employee/employeeTypes';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/components/ui/select';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 
-interface Employee {
-  id: string;
-  first_name: string;
-  last_name: string;
-  full_name: string;
-  status: string;
-}
+const ALL_ROE = '__all__';
+const headClass =
+  'h-10 bg-muted/40 px-3 text-xs font-medium tracking-wider whitespace-nowrap text-muted-foreground uppercase';
 
-interface Termination {
-  id: number;
-  employee_id: string;
-  last_working_date: string;
-  termination_effective_date: string;
-  roe_reason_code: string;
-  other_reason?: string;
-  internal_reason?: string;
-  remarks?: string;
-  created_at: string;
-  created_by?: string;
-  employee?: Employee;
-}
-
-const ROE_REASON_CODES = {
-  'A': 'Shortage of work',
-  'B': 'Strike or lockout',
-  'C': 'Return to school',
-  'D': 'Illness or injury',
-  'E': 'Quit',
-  'F': 'Maternity leave',
-  'G': 'Retirement',
-  'M': 'Dismissal or termination',
-  'N': 'Leave of absence',
-  'K': 'Other'
-};
 
 const TerminationPage: React.FC = () => {
   const [terminations, setTerminations] = useState<Termination[]>([]);
@@ -274,447 +237,324 @@ const TerminationPage: React.FC = () => {
     setError('');
   };
 
-  const selectedEmployee = employees.find(emp => emp.id === formData.employee_id);
+  const closeError = useCallback(() => setError(''), []);
+  const closeSuccess = useCallback(() => setSuccess(''), []);
+  const [roeFilter, setRoeFilter] = useState('');
+
+  const roeOptions = Object.keys(ROE_REASON_CODES).filter((code) =>
+    terminations.some((t) => t.roe_reason_code === code)
+  );
+  const visibleTerminations = filteredTerminations.filter(
+    (term) => !roeFilter || term.roe_reason_code === roeFilter
+  );
+  const hasFilters = !!searchTerm || !!roeFilter;
+  const clearFilters = () => {
+    setSearchTerm('');
+    setRoeFilter('');
+  };
 
   if (!hasPermission('termination:view')) {
     return (
-      <Box p={3}>
-        <Alert severity="error">You do not have permission to view terminations.</Alert>
-      </Box>
+      <div className="p-6">
+        <Alert variant="destructive">
+          <AlertDescription>You do not have permission to view terminations.</AlertDescription>
+        </Alert>
+      </div>
     );
   }
 
+  const renderBody = () => {
+    if (loading) {
+      return (
+        <div className="space-y-2 p-4">
+          <Skeleton className="h-9 w-full" />
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full" />
+          ))}
+        </div>
+      );
+    }
+    if (visibleTerminations.length === 0) {
+      return (
+        <div className="flex flex-col items-center gap-2 px-6 py-16 text-center">
+          <UserMinus className="size-8 text-muted-foreground" />
+          <p className="m-0 text-sm font-medium text-foreground">No terminations found</p>
+          <p className="m-0 text-sm text-muted-foreground">
+            {hasFilters
+              ? 'No records match your search or ROE reason filter.'
+              : 'Terminations you record will appear here.'}
+          </p>
+          {hasFilters ? (
+            <Button variant="outline" className="mt-2" onClick={clearFilters}>
+              <X className="size-4" /> Clear filters
+            </Button>
+          ) : (
+            hasPermission('termination:create') && (
+              <Button className="mt-2" onClick={handleCreateClick}>
+                <Plus className="size-4" /> Create Termination
+              </Button>
+            )
+          )}
+        </div>
+      );
+    }
+    return (
+      <Table>
+        <TableHeader>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className={headClass}>Employee</TableHead>
+            <TableHead className={headClass}>Employee ID</TableHead>
+            <TableHead className={headClass}>Last Working Date</TableHead>
+            <TableHead className={headClass}>Termination Effective Date</TableHead>
+            <TableHead className={headClass}>ROE Reason</TableHead>
+            <TableHead className={headClass}>Created Date</TableHead>
+            <TableHead className={cn(headClass, 'text-right')}>Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {visibleTerminations.map((termination) => {
+            const emp = termination.employee;
+            return (
+              <TableRow key={termination.id}>
+                <TableCell className="px-3 py-2.5">
+                  <div className="flex items-center gap-2.5">
+                    <Avatar className="size-8">
+                      <AvatarFallback className="bg-muted text-xs font-medium text-muted-foreground">
+                        {emp ? getInitials(emp.first_name, emp.last_name) : '?'}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="font-medium whitespace-nowrap text-foreground">
+                      {emp?.full_name || 'N/A'}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className="px-3 py-2.5">
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
+                    {termination.employee_id}
+                  </span>
+                </TableCell>
+                <TableCell className="px-3 py-2.5 text-sm whitespace-nowrap tabular-nums">
+                  {formatLocalDate(termination.last_working_date)}
+                </TableCell>
+                <TableCell className="px-3 py-2.5 text-sm font-medium whitespace-nowrap text-foreground tabular-nums">
+                  {formatLocalDate(termination.termination_effective_date)}
+                </TableCell>
+                <TableCell className="px-3 py-2.5">
+                  <div className="flex items-center gap-2 whitespace-nowrap">
+                    <Badge
+                      variant="secondary"
+                      className={cn('font-mono', getRoeBadgeClass(termination.roe_reason_code))}
+                    >
+                      {termination.roe_reason_code}
+                    </Badge>
+                    <span className="text-sm text-foreground">
+                      {getRoeLabel(termination.roe_reason_code)}
+                    </span>
+                  </div>
+                </TableCell>
+                <TableCell className="px-3 py-2.5 text-sm whitespace-nowrap text-muted-foreground tabular-nums">
+                  {new Date(termination.created_at).toLocaleDateString()}
+                </TableCell>
+                <TableCell className="px-3 py-2.5">
+                  <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          aria-label="View"
+                          onClick={() => handleViewClick(termination)}
+                        >
+                          <Eye className="size-4" />
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>View</TooltipContent>
+                    </Tooltip>
+                    {hasPermission('termination:update') && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label="Edit"
+                            onClick={() => handleEditClick(termination)}
+                          >
+                            <Pencil className="size-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Edit</TooltipContent>
+                      </Tooltip>
+                    )}
+                    {hasPermission('termination:delete') && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive hover:text-destructive"
+                            aria-label="Delete"
+                            onClick={() => handleDeleteClick(termination)}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>Delete</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    );
+  };
+
   return (
-    <Box p={3}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" component="h1">
-          Termination Management
-        </Typography>
+    <div className="space-y-4 p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="m-0 text-2xl font-semibold tracking-tight text-foreground">
+            Termination Management
+          </h1>
+          <p className="m-0 mt-1 text-sm text-muted-foreground">
+            Record employee offboarding, effective dates, and ROE reason codes
+          </p>
+        </div>
         {hasPermission('termination:create') && (
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={handleCreateClick}
-          >
-            Create Termination
+          <Button className="rounded-md" onClick={handleCreateClick}>
+            <Plus className="size-4" /> Create Termination
           </Button>
         )}
-      </Box>
+      </div>
 
-      {error && (
-        <Alert severity="error" onClose={() => setError('')} sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-solid border-border bg-card p-3">
+        <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
+          <div className="relative w-full sm:w-80">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search by employee name or ID..."
+              className="px-8"
+              aria-label="Search terminations"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setSearchTerm('')}
+                className="absolute top-1/2 right-2 flex size-5 -translate-y-1/2 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                <X className="size-4" />
+              </button>
+            )}
+          </div>
+          <Select
+            value={roeFilter || ALL_ROE}
+            onValueChange={(v) => setRoeFilter(v === ALL_ROE ? '' : v)}
+          >
+            <SelectTrigger className="w-full sm:w-[240px]" aria-label="ROE Reason filter">
+              <SelectValue placeholder="All ROE Reasons" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_ROE}>All ROE Reasons</SelectItem>
+              {roeOptions.map((code) => (
+                <SelectItem key={code} value={code}>
+                  {code} - {getRoeLabel(code)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="tabular-nums">
+            {visibleTerminations.length} {visibleTerminations.length === 1 ? 'record' : 'records'}
+          </Badge>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                aria-label="Refresh"
+                onClick={handleSearch}
+                disabled={loading}
+              >
+                <RefreshCw className={cn('size-4', loading && 'animate-spin')} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Refresh</TooltipContent>
+          </Tooltip>
+        </div>
+      </div>
 
-      {success && (
-        <Alert severity="success" onClose={() => setSuccess('')} sx={{ mb: 2 }}>
-          {success}
-        </Alert>
-      )}
+      <div className="overflow-hidden rounded-lg border border-solid border-border bg-card">
+        {renderBody()}
+      </div>
 
-      <Paper sx={{ p: 2, mb: 3 }}>
-        <Box display="flex" gap={2} alignItems="center">
-          <TextField
-            label="Search"
-            variant="outlined"
-            size="small"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            InputProps={{
-              startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />,
-            }}
-            sx={{ flexGrow: 1 }}
-          />
-          <Button variant="outlined" onClick={handleSearch}>
-            Search
-          </Button>
-        </Box>
-      </Paper>
+      <TerminationFormDialog
+        mode="create"
+        open={createDialogOpen}
+        formData={formData}
+        employees={employees}
+        canPickEmployee={hasPermission('termination:create')}
+        onChange={(patch) => setFormData((f) => ({ ...f, ...patch }))}
+        onClose={handleClose}
+        onSubmit={handleCreateSubmit}
+      />
 
-      {loading ? (
-        <Box display="flex" justifyContent="center" p={3}>
-          <CircularProgress />
-        </Box>
-      ) : (
-        <TableContainer component={Paper}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>Employee</TableCell>
-                <TableCell>Employee ID</TableCell>
-                <TableCell>Last Working Date</TableCell>
-                <TableCell>Termination Effective Date</TableCell>
-                <TableCell>ROE Reason Code</TableCell>
-                <TableCell>ROE Reason</TableCell>
-                <TableCell>Created Date</TableCell>
-                <TableCell align="right">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredTerminations.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} align="center">
-                    <Typography variant="body2" color="text.secondary" py={3}>
-                      No terminations found
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredTerminations.map((termination) => (
-                  <TableRow key={termination.id}>
-                    <TableCell>{termination.employee?.full_name || 'N/A'}</TableCell>
-                    <TableCell>{termination.employee_id}</TableCell>
-                    <TableCell>
-                      {formatLocalDate(termination.last_working_date)}
-                    </TableCell>
-                    <TableCell>
-                      {formatLocalDate(termination.termination_effective_date)}
-                    </TableCell>
-                    <TableCell>
-                      <Chip label={termination.roe_reason_code} size="small" />
-                    </TableCell>
-                    <TableCell>
-                      {ROE_REASON_CODES[termination.roe_reason_code as keyof typeof ROE_REASON_CODES] || 'Unknown'}
-                    </TableCell>
-                    <TableCell>
-                      {new Date(termination.created_at).toLocaleDateString()}
-                    </TableCell>
-                    <TableCell align="right">
-                      <IconButton
-                        size="small"
-                        onClick={() => handleViewClick(termination)}
-                        color="primary"
-                      >
-                        <VisibilityIcon />
-                      </IconButton>
-                      {hasPermission('termination:update') && (
-                        <IconButton
-                          size="small"
-                          onClick={() => handleEditClick(termination)}
-                          color="primary"
-                        >
-                          <EditIcon />
-                        </IconButton>
-                      )}
-                      {hasPermission('termination:delete') && (
-                        <IconButton
-                          size="small"
-                          onClick={() => handleDeleteClick(termination)}
-                          color="error"
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
+      <TerminationFormDialog
+        mode="edit"
+        open={editDialogOpen}
+        formData={formData}
+        employees={employees}
+        canPickEmployee={false}
+        onChange={(patch) => setFormData((f) => ({ ...f, ...patch }))}
+        onClose={handleClose}
+        onSubmit={handleEditSubmit}
+      />
 
-      {/* Create Dialog */}
-      <Dialog open={createDialogOpen} onClose={handleClose} maxWidth="md" fullWidth>
-        <DialogTitle>Create Termination</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2 }}>
-            <Autocomplete
-              options={employees}
-              getOptionLabel={(option) => `${option.full_name} (${option.id})`}
-              value={selectedEmployee || null}
-              onChange={(_, newValue) => {
-                setFormData({ ...formData, employee_id: newValue?.id || '' });
+      <TerminationViewDialog
+        termination={viewDialogOpen ? viewingTermination : null}
+        formatLocalDate={formatLocalDate}
+        onClose={handleClose}
+      />
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={(o) => !o && handleClose()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Termination</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete the termination record for{' '}
+              <strong className="text-foreground">
+                {terminationToDelete?.employee?.full_name || terminationToDelete?.employee_id}
+              </strong>
+              ? This will restore the employee's status to Active.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteConfirm();
               }}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="Employee *"
-                  variant="outlined"
-                  fullWidth
-                  sx={{ mb: 2 }}
-                />
-              )}
-              disabled={!hasPermission('termination:create')}
-            />
-            <TextField
-              label="Last Working Date *"
-              type="date"
-              value={formData.last_working_date}
-              onChange={(e) => setFormData({ ...formData, last_working_date: e.target.value })}
-              fullWidth
-              InputLabelProps={{ shrink: true }}
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              label="Termination Effective Date *"
-              type="date"
-              value={formData.termination_effective_date}
-              onChange={(e) => setFormData({ ...formData, termination_effective_date: e.target.value })}
-              fullWidth
-              InputLabelProps={{ shrink: true }}
-              sx={{ mb: 2 }}
-            />
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>ROE Reason Code *</InputLabel>
-              <Select
-                value={formData.roe_reason_code}
-                onChange={(e) => setFormData({ ...formData, roe_reason_code: e.target.value })}
-                label="ROE Reason Code *"
-              >
-                {Object.entries(ROE_REASON_CODES).map(([code, description]) => (
-                  <MenuItem key={code} value={code}>
-                    {code} - {description}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            {formData.roe_reason_code === 'K' && (
-              <TextField
-                label="Other Reason *"
-                value={formData.other_reason}
-                onChange={(e) => setFormData({ ...formData, other_reason: e.target.value })}
-                fullWidth
-                multiline
-                rows={3}
-                sx={{ mb: 2 }}
-              />
-            )}
-            <TextField
-              label="Internal Reason"
-              value={formData.internal_reason}
-              onChange={(e) => setFormData({ ...formData, internal_reason: e.target.value })}
-              fullWidth
-              multiline
-              rows={3}
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              label="Remarks"
-              value={formData.remarks}
-              onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
-              fullWidth
-              multiline
-              rows={3}
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>Cancel</Button>
-          <Button onClick={handleCreateSubmit} variant="contained" color="primary">
-            Create
-          </Button>
-        </DialogActions>
-      </Dialog>
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-      {/* Edit Dialog */}
-      <Dialog open={editDialogOpen} onClose={handleClose} maxWidth="md" fullWidth>
-        <DialogTitle>Edit Termination</DialogTitle>
-        <DialogContent>
-          <Box sx={{ pt: 2 }}>
-            <TextField
-              label="Employee ID"
-              value={formData.employee_id}
-              disabled
-              fullWidth
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              label="Last Working Date *"
-              type="date"
-              value={formData.last_working_date}
-              onChange={(e) => setFormData({ ...formData, last_working_date: e.target.value })}
-              fullWidth
-              InputLabelProps={{ shrink: true }}
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              label="Termination Effective Date *"
-              type="date"
-              value={formData.termination_effective_date}
-              onChange={(e) => setFormData({ ...formData, termination_effective_date: e.target.value })}
-              fullWidth
-              InputLabelProps={{ shrink: true }}
-              sx={{ mb: 2 }}
-            />
-            <FormControl fullWidth sx={{ mb: 2 }}>
-              <InputLabel>ROE Reason Code *</InputLabel>
-              <Select
-                value={formData.roe_reason_code}
-                onChange={(e) => setFormData({ ...formData, roe_reason_code: e.target.value })}
-                label="ROE Reason Code *"
-              >
-                {Object.entries(ROE_REASON_CODES).map(([code, description]) => (
-                  <MenuItem key={code} value={code}>
-                    {code} - {description}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            {formData.roe_reason_code === 'K' && (
-              <TextField
-                label="Other Reason *"
-                value={formData.other_reason}
-                onChange={(e) => setFormData({ ...formData, other_reason: e.target.value })}
-                fullWidth
-                multiline
-                rows={3}
-                sx={{ mb: 2 }}
-              />
-            )}
-            <TextField
-              label="Internal Reason"
-              value={formData.internal_reason}
-              onChange={(e) => setFormData({ ...formData, internal_reason: e.target.value })}
-              fullWidth
-              multiline
-              rows={3}
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              label="Remarks"
-              value={formData.remarks}
-              onChange={(e) => setFormData({ ...formData, remarks: e.target.value })}
-              fullWidth
-              multiline
-              rows={3}
-            />
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>Cancel</Button>
-          <Button onClick={handleEditSubmit} variant="contained" color="primary">
-            Update
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* View Dialog */}
-      <Dialog open={viewDialogOpen} onClose={handleClose} maxWidth="md" fullWidth>
-        <DialogTitle>Termination Details</DialogTitle>
-        <DialogContent>
-          {viewingTermination && (
-            <Box sx={{ pt: 2 }}>
-              <Grid container spacing={2}>
-                <Grid item xs={12} sm={6}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Employee
-                  </Typography>
-                  <Typography variant="body1" gutterBottom>
-                    {viewingTermination.employee?.full_name || 'N/A'}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Employee ID
-                  </Typography>
-                  <Typography variant="body1" gutterBottom>
-                    {viewingTermination.employee_id}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Last Working Date
-                  </Typography>
-                  <Typography variant="body1" gutterBottom>
-                    {formatLocalDate(viewingTermination.last_working_date)}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Termination Effective Date
-                  </Typography>
-                  <Typography variant="body1" gutterBottom>
-                    {formatLocalDate(viewingTermination.termination_effective_date)}
-                  </Typography>
-                </Grid>
-                <Grid item xs={12} sm={6}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    ROE Reason Code
-                  </Typography>
-                  <Chip
-                    label={`${viewingTermination.roe_reason_code} - ${ROE_REASON_CODES[viewingTermination.roe_reason_code as keyof typeof ROE_REASON_CODES] || 'Unknown'}`}
-                    sx={{ mt: 1 }}
-                  />
-                </Grid>
-                {viewingTermination.other_reason && (
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      Other Reason
-                    </Typography>
-                    <Typography variant="body1" gutterBottom>
-                      {viewingTermination.other_reason}
-                    </Typography>
-                  </Grid>
-                )}
-                {viewingTermination.internal_reason && (
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      Internal Reason
-                    </Typography>
-                    <Typography variant="body1" gutterBottom>
-                      {viewingTermination.internal_reason}
-                    </Typography>
-                  </Grid>
-                )}
-                {viewingTermination.remarks && (
-                  <Grid item xs={12}>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      Remarks
-                    </Typography>
-                    <Typography variant="body1" gutterBottom>
-                      {viewingTermination.remarks}
-                    </Typography>
-                  </Grid>
-                )}
-                <Grid item xs={12} sm={6}>
-                  <Typography variant="subtitle2" color="text.secondary">
-                    Created Date
-                  </Typography>
-                  <Typography variant="body1" gutterBottom>
-                    {new Date(viewingTermination.created_at).toLocaleString()}
-                  </Typography>
-                </Grid>
-                {viewingTermination.created_by && (
-                  <Grid item xs={12} sm={6}>
-                    <Typography variant="subtitle2" color="text.secondary">
-                      Created By
-                    </Typography>
-                    <Typography variant="body1" gutterBottom>
-                      {viewingTermination.created_by}
-                    </Typography>
-                  </Grid>
-                )}
-              </Grid>
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>Close</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Delete Confirmation Dialog */}
-      <Dialog open={deleteDialogOpen} onClose={handleClose}>
-        <DialogTitle>Delete Termination</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Are you sure you want to delete the termination record for{' '}
-            <strong>{terminationToDelete?.employee?.full_name || terminationToDelete?.employee_id}</strong>?
-            This will restore the employee's status to Active.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>Cancel</Button>
-          <Button onClick={handleDeleteConfirm} variant="contained" color="error">
-            Delete
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
+      <AppToast message={error || null} variant="error" onClose={closeError} />
+      <AppToast message={success || null} variant="success" onClose={closeSuccess} autoHideMs={3000} />
+    </div>
   );
 };
 
 export default TerminationPage;
-
