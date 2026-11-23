@@ -1,5 +1,5 @@
-import React from 'react';
-import { Info, Loader2, TriangleAlert } from 'lucide-react';
+import React, { useRef } from 'react';
+import { Eye, Info, Loader2, TriangleAlert, Upload } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -11,6 +11,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -22,60 +23,234 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
+import type { AttendanceUploadPreview, AttendanceUploadResponse } from './attendanceTypes';
 
 const labelClass = 'text-xs font-medium text-muted-foreground';
+const headClass =
+  'sticky top-0 z-10 h-9 bg-muted px-3 text-xs font-medium tracking-wider text-muted-foreground uppercase';
 
 /* ---------------------------------- Upload --------------------------------- */
 
 interface UploadCsvDialogProps {
   open: boolean;
   file: File | null;
-  loading: boolean;
+  previewData: AttendanceUploadPreview | null;
+  uploadResult: AttendanceUploadResponse | null;
+  previewLoading: boolean;
+  uploadLoading: boolean;
   onFileChange: (file: File | null) => void;
-  onUpload: () => void;
+  onPreview: () => void;
+  onImport: () => void;
   onClose: () => void;
+}
+
+function statusBadgeClass(status: string) {
+  if (status === 'valid') return 'bg-event-union/15 text-event-union';
+  if (status === 'duplicate') return 'bg-event-cra/15 text-event-cra';
+  return 'bg-destructive/10 text-destructive';
 }
 
 export const UploadCsvDialog: React.FC<UploadCsvDialogProps> = ({
   open,
   file,
-  loading,
+  previewData,
+  uploadResult,
+  previewLoading,
+  uploadLoading,
   onFileChange,
-  onUpload,
+  onPreview,
+  onImport,
   onClose,
-}) => (
-  <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
-    <DialogContent className="sm:max-w-md">
-      <DialogHeader>
-        <DialogTitle>Upload Attendance CSV</DialogTitle>
-        <DialogDescription>Choose a punch-log CSV export to import.</DialogDescription>
-      </DialogHeader>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="attendance-csv" className={labelClass}>
-          CSV file
-        </Label>
-        <Input
-          id="attendance-csv"
-          type="file"
-          accept=".csv"
-          className="h-auto cursor-pointer py-1.5"
-          onChange={(e) => onFileChange(e.target.files?.[0] || null)}
-        />
-        {file && <p className="m-0 text-xs text-muted-foreground">Selected: {file.name}</p>}
-      </div>
-      <DialogFooter>
-        <Button variant="outline" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button onClick={onUpload} disabled={!file || loading}>
-          {loading && <Loader2 className="animate-spin" />}
-          Upload
-        </Button>
-      </DialogFooter>
-    </DialogContent>
-  </Dialog>
-);
+}) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const busy = previewLoading || uploadLoading;
+
+  const resultTiles = uploadResult
+    ? [
+        { label: 'Imported', value: uploadResult.imported_count, tint: 'bg-event-union/15 text-event-union' },
+        { label: 'Skipped', value: uploadResult.skipped_count, tint: 'bg-event-cra/15 text-event-cra' },
+        { label: 'Errors', value: uploadResult.error_count, tint: 'bg-destructive/10 text-destructive' },
+      ]
+    : [];
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => !next && onClose()}>
+      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-4xl">
+        <DialogHeader>
+          <DialogTitle>Upload Attendance CSV</DialogTitle>
+          <DialogDescription>
+            Choose a punch-log CSV, preview the rows, then confirm import.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-0.5 pr-1">
+          <div className="flex flex-col gap-2">
+            <h3 className="m-0 text-sm font-semibold text-foreground">Select CSV File</h3>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={(e) => onFileChange(e.target.files?.[0] || null)}
+              />
+              <Button variant="outline" disabled={busy} onClick={() => fileInputRef.current?.click()}>
+                <Upload />
+                Choose File
+              </Button>
+              {file && <span className="text-sm text-muted-foreground">{file.name}</span>}
+            </div>
+          </div>
+
+          {file && !uploadResult && (
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <Button onClick={onPreview} disabled={!file || busy}>
+                  {previewLoading ? <Loader2 className="animate-spin" /> : <Eye />}
+                  Preview
+                </Button>
+                {previewData && (
+                  <span className="text-sm text-muted-foreground tabular-nums">
+                    {previewData.valid_rows} valid, {previewData.invalid_rows} invalid,{' '}
+                    {previewData.duplicate_rows} duplicates
+                  </span>
+                )}
+              </div>
+
+              {previewData && (
+                <div className="flex flex-col gap-2">
+                  <h3 className="m-0 text-sm font-semibold text-foreground">Preview Results</h3>
+                  <div className="overflow-hidden rounded-lg border border-solid border-border">
+                    <Table containerClassName="max-h-72 overflow-y-auto">
+                      <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                          {[
+                            'Row',
+                            'Person ID',
+                            'Name',
+                            'Date',
+                            'Check-In',
+                            'Check-Out',
+                            'Status',
+                            'Will Import',
+                            'Error',
+                          ].map((h) => (
+                            <TableHead key={h} className={headClass}>
+                              {h}
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {previewData.rows.map((row) => (
+                          <TableRow key={row.row_number}>
+                            <TableCell className="px-3 text-sm tabular-nums">{row.row_number}</TableCell>
+                            <TableCell className="px-3 text-sm">{row.person_id}</TableCell>
+                            <TableCell className="px-3 text-sm">{row.name}</TableCell>
+                            <TableCell className="px-3 text-sm tabular-nums">{row.date}</TableCell>
+                            <TableCell className="px-3 text-sm tabular-nums">{row.check_in || '-'}</TableCell>
+                            <TableCell className="px-3 text-sm tabular-nums">{row.check_out || '-'}</TableCell>
+                            <TableCell className="px-3">
+                              <Badge
+                                variant="secondary"
+                                className={cn(
+                                  'rounded-md px-1.5 text-[11px] font-medium capitalize',
+                                  statusBadgeClass(row.status),
+                                )}
+                              >
+                                {row.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="px-3">
+                              <Badge
+                                variant="secondary"
+                                className={cn(
+                                  'rounded-md px-1.5 text-[11px] font-medium',
+                                  row.status === 'valid'
+                                    ? 'bg-event-union/15 text-event-union'
+                                    : 'bg-destructive/10 text-destructive',
+                                )}
+                              >
+                                {row.status === 'valid' ? 'Yes' : 'No'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="px-3 text-xs text-destructive">
+                              {row.error_message || ''}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {uploadResult && (
+            <div className="flex flex-col gap-3">
+              <h3 className="m-0 text-sm font-semibold text-foreground">Import Results</h3>
+              <div className="grid grid-cols-3 gap-3">
+                {resultTiles.map((tile) => (
+                  <div
+                    key={tile.label}
+                    className={cn('flex flex-col items-center rounded-lg px-3 py-3 text-center', tile.tint)}
+                  >
+                    <span className="text-2xl font-semibold tabular-nums">{tile.value}</span>
+                    <span className="text-xs">{tile.label}</span>
+                  </div>
+                ))}
+              </div>
+              {uploadResult.errors.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <h3 className="m-0 text-sm font-semibold text-foreground">Error Details</h3>
+                  <div className="overflow-hidden rounded-lg border border-solid border-border">
+                    <Table containerClassName="max-h-52 overflow-y-auto">
+                      <TableHeader>
+                        <TableRow className="hover:bg-transparent">
+                          <TableHead className={headClass}>Message</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {uploadResult.errors.map((err, index) => (
+                          <TableRow key={index}>
+                            <TableCell className="px-3 text-xs text-destructive">{err}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            {uploadResult ? 'Close' : 'Cancel'}
+          </Button>
+          {previewData && !uploadResult && (
+            <Button onClick={onImport} disabled={busy || previewData.valid_rows === 0}>
+              {uploadLoading && <Loader2 className="animate-spin" />}
+              Confirm Import ({previewData.valid_rows})
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
 
 /* ------------------------------ Delete by range ----------------------------- */
 

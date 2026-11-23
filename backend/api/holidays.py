@@ -1,8 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+import io
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from typing import List, Optional
 from datetime import date
 from schemas import BaseModel
 from api.dependencies import require_permission
+from services.holiday_import import build_holiday_template, import_holiday_workbook
 from repos.holiday_repo import (
     list_holidays as repo_list_holidays,
     get_holiday as repo_get_holiday,
@@ -50,6 +53,17 @@ class CopyHolidaysResponse(BaseModel):
     total_source: int
     message: str
 
+class HolidayImportIssueResponse(BaseModel):
+    row: int
+    message: str
+
+class HolidayImportResponse(BaseModel):
+    created: int
+    skipped: int
+    failed: int
+    errors: List[HolidayImportIssueResponse]
+    message: str
+
 @router.get("", response_model=List[HolidayResponse])
 @router.get("/", response_model=List[HolidayResponse])
 async def list_holidays(
@@ -71,6 +85,51 @@ async def list_holidays(
         ) for h in holidays]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching holidays: {str(e)}")
+
+@router.get("/import/template")
+async def download_holiday_template(
+    current_user: dict = Depends(require_permission("holiday:view"))
+):
+    """Download an Excel template for holiday upload."""
+    content = build_holiday_template()
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=holiday_upload_template.xlsx"},
+    )
+
+
+@router.post("/import", response_model=HolidayImportResponse)
+async def import_holidays(
+    file: UploadFile = File(...),
+    company_id: Optional[str] = Form(None),
+    current_user: dict = Depends(require_permission("holiday:create"))
+):
+    """Create holidays from an Excel file. Existing company/date rows are skipped."""
+    filename = (file.filename or "").lower()
+    if not filename.endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="File must be an Excel file (.xlsx or .xls)")
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="File is empty")
+    try:
+        result = import_holiday_workbook(
+            contents,
+            company_id,
+            performed_by=current_user.get("username"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error importing holidays: {str(e)}")
+    return HolidayImportResponse(
+        created=result.created,
+        skipped=result.skipped,
+        failed=result.failed,
+        errors=[HolidayImportIssueResponse(row=item.row, message=item.message) for item in result.errors[:50]],
+        message=result.message,
+    )
+
 
 @router.get("/{holiday_id}", response_model=HolidayResponse)
 async def get_holiday(

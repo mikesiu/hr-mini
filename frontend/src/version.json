@@ -1,7 +1,19 @@
 {
-  "version": "2.1.0",
-  "release_date": "2026-11-20",
+  "version": "2.2.0",
+  "release_date": "2026-11-23",
   "history": [
+    {
+      "version": "2.2.0",
+      "date": "2026-11-23",
+      "changes": [
+        "Holiday Management: upload holidays from Excel instead of entering them one by one, with a downloadable template",
+        "Excel columns are Date and Name, plus optional Company, Active, and Union Only. A blank Company uses the company selected in the upload dialog",
+        "Holiday dates that already exist for that company are skipped, and rows that cannot be imported are listed",
+        "Attendance CSV upload previews each row before import, showing valid, invalid, and duplicate counts",
+        "Attendance preview explains a missing employee ID (including a matching ID when the name is found), an invalid date, or a record that already exists",
+        "Blank or dash punch times in an attendance CSV are treated as empty"
+      ]
+    },
     {
       "version": "2.1.0",
       "date": "2026-11-20",

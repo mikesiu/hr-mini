@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Building2, CalendarDays, Copy, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Building2, CalendarDays, Copy, Pencil, Plus, Trash2, Upload } from 'lucide-react';
 import { holidayAPI } from '../api/client';
 import { useCompanyFilter } from '../contexts/CompanyFilterContext';
 import AppToast from '../components/AppToast';
@@ -72,6 +72,17 @@ const HolidayPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [copyDialogOpen, setCopyDialogOpen] = useState(false);
   const [copying, setCopying] = useState(false);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadCompanyId, setUploadCompanyId] = useState('');
+  const [uploadResult, setUploadResult] = useState<{
+    created: number;
+    skipped: number;
+    failed: number;
+    errors: { row: number; message: string }[];
+    message: string;
+  } | null>(null);
 
   // Get current year and generate year options (current year ± 2)
   const currentYear = new Date().getFullYear();
@@ -371,6 +382,54 @@ const HolidayPage: React.FC = () => {
     setCopyDialogOpen(true);
   };
 
+  const openUploadDialog = () => {
+    setUploadFile(null);
+    setUploadResult(null);
+    setUploadCompanyId(selectedCompanyId !== 'all' ? selectedCompanyId : '');
+    setUploadDialogOpen(true);
+  };
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const response = await holidayAPI.downloadTemplate();
+      const { downloadBlobFile } = await import('../utils/downloadFile');
+      const result = await downloadBlobFile({
+        filename: 'holiday_upload_template.xlsx',
+        data: response.data,
+      });
+      if (result === 'cancelled') return;
+    } catch (error: any) {
+      setSnackbar({
+        open: true,
+        message: error.response?.data?.detail || 'Could not download the template',
+        severity: 'error',
+      });
+    }
+  };
+
+  const handleImportExcel = async () => {
+    if (!uploadFile) {
+      setSnackbar({ open: true, message: 'Choose an Excel file', severity: 'error' });
+      return;
+    }
+    try {
+      setUploading(true);
+      const response = await holidayAPI.importExcel(uploadFile, uploadCompanyId || undefined);
+      setUploadResult(response.data);
+      setSnackbar({
+        open: true,
+        message: response.data?.message || 'Holidays imported',
+        severity: response.data?.failed ? 'error' : 'success',
+      });
+      fetchHolidays();
+    } catch (error: any) {
+      const detail = error.response?.data?.detail || error.message || 'Error importing holidays';
+      setSnackbar({ open: true, message: detail, severity: 'error' });
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const hasFilters = !!searchTerm || selectedCompanyId !== 'all' || selectedYear !== 'all';
   const companyLabel = (c: { id: string; trade_name?: string | null; legal_name: string }) =>
     `${c.trade_name || c.legal_name} (${c.id})`;
@@ -496,6 +555,14 @@ const HolidayPage: React.FC = () => {
               }
             >
               <Copy className="size-4" /> Copy Holidays
+            </Button>
+            <Button
+              variant="outline"
+              className="rounded-md"
+              onClick={openUploadDialog}
+              disabled={companies.length === 0}
+            >
+              <Upload className="size-4" /> Upload Excel
             </Button>
             <Button className="rounded-md" onClick={() => handleOpenDialog()} disabled={companies.length === 0}>
               <Plus className="size-4" /> Add Holiday
@@ -772,6 +839,81 @@ const HolidayPage: React.FC = () => {
             >
               <Copy className="size-4" /> {copying ? 'Copying...' : 'Copy Holidays'}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={uploadDialogOpen} onOpenChange={(o) => !o && !uploading && setUploadDialogOpen(false)}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Upload Holidays from Excel</DialogTitle>
+            <DialogDescription>
+              Import many holidays at once. Dates already saved for that company are skipped.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-1.5">
+              <Label>Company for rows with a blank Company column</Label>
+              <Select value={uploadCompanyId || undefined} onValueChange={setUploadCompanyId}>
+                <SelectTrigger className="w-full" aria-label="Company for upload">
+                  <SelectValue placeholder="Select company" />
+                </SelectTrigger>
+                <SelectContent>
+                  {companies.map((company) => (
+                    <SelectItem key={company.id} value={company.id}>
+                      {companyLabel(company)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="m-0 text-xs text-muted-foreground">
+                Required unless every row has a Company id or name.
+              </p>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="holiday-excel">Excel file *</Label>
+              <Input
+                id="holiday-excel"
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={(e) => {
+                  setUploadFile(e.target.files?.[0] ?? null);
+                  setUploadResult(null);
+                }}
+              />
+            </div>
+            <Alert>
+              <AlertDescription>
+                Columns: Date, Name. Optional: Company, Active, Union Only. Use a date cell or YYYY-MM-DD.
+              </AlertDescription>
+            </Alert>
+            {uploadResult && (
+              <div className="grid gap-2 text-sm">
+                <p className="m-0">{uploadResult.message}</p>
+                {uploadResult.errors.length > 0 && (
+                  <ul className="m-0 max-h-40 list-disc space-y-1 overflow-y-auto pl-5 text-muted-foreground">
+                    {uploadResult.errors.map((issue) => (
+                      <li key={`${issue.row}-${issue.message}`}>
+                        Row {issue.row}: {issue.message}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+          </div>
+          <DialogFooter className="sm:justify-between">
+            <Button variant="outline" onClick={handleDownloadTemplate} disabled={uploading}>
+              Download template
+            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setUploadDialogOpen(false)} disabled={uploading}>
+                Close
+              </Button>
+              <Button onClick={handleImportExcel} disabled={uploading || !uploadFile}>
+                <Upload className="size-4" /> {uploading ? 'Uploading...' : 'Import'}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

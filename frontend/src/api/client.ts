@@ -196,6 +196,15 @@ export const holidayAPI = {
       year: year,
       skip_duplicates: skipDuplicates,
     }),
+  downloadTemplate: () => apiClient.get('/holidays/import/template', { responseType: 'blob' }),
+  importExcel: (file: File, companyId?: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (companyId) formData.append('company_id', companyId);
+    return apiClient.post('/holidays/import', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
 };
 
 export type CodeCategory = 'employee_type' | 'wage_classification' | 'department' | 'position';

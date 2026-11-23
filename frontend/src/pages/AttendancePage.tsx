@@ -21,6 +21,7 @@ import {
 import type {
   Attendance, AttendanceReport, AttendanceDetailedReport, PayPeriod, Employee,
   DetailedRowWithSubtotal, AttendanceDetailRow,
+  AttendanceUploadPreview, AttendanceUploadResponse,
 } from '../components/attendance/attendanceTypes';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent } from '@/components/ui/collapsible';
@@ -316,6 +317,9 @@ const AttendancePage: React.FC = () => {
   const [reportEmployeeId, setReportEmployeeId] = useState<string>('');
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
   const [file, setFile] = useState<File | null>(null);
+  const [uploadPreview, setUploadPreview] = useState<AttendanceUploadPreview | null>(null);
+  const [uploadResult, setUploadResult] = useState<AttendanceUploadResponse | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
   
   // Filter state
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
@@ -575,15 +579,39 @@ const AttendancePage: React.FC = () => {
   // Note: Report is only loaded when user clicks "Generate Report" button
   // Removed auto-loading to prevent automatic generation when dates change
 
-  const handleUploadCSV = async () => {
+  const resetUploadDialog = () => {
+    setUploadDialogOpen(false);
+    setFile(null);
+    setUploadPreview(null);
+    setUploadResult(null);
+    setPreviewLoading(false);
+  };
+
+  const handlePreviewCSV = async () => {
     if (!file) return;
+    try {
+      setPreviewLoading(true);
+      setUploadResult(null);
+      const response = await attendanceAPI.previewCSV(file);
+      setUploadPreview(response.data);
+    } catch (error: any) {
+      const errorDetail = error.response?.data?.detail || error.message;
+      setSnackbar({ open: true, message: `Error previewing CSV: ${errorDetail}`, severity: 'error' });
+      setUploadPreview(null);
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleUploadCSV = async () => {
+    if (!file || !uploadPreview) return;
     try {
       setLoading(true);
       const response = await attendanceAPI.uploadCSV(file);
-      const result = response.data;
-      
-      // Build detailed message
-      let message = `CSV upload completed: `;
+      const result = response.data as AttendanceUploadResponse;
+      setUploadResult(result);
+
+      let message = `CSV import completed: `;
       if (result.imported_count > 0) {
         message += `${result.imported_count} record(s) imported`;
       }
@@ -593,35 +621,23 @@ const AttendancePage: React.FC = () => {
       if (result.error_count > 0) {
         message += `, ${result.error_count} error(s)`;
       }
-      
-      if (result.errors && result.errors.length > 0) {
-        message += `. Errors: ${result.errors.slice(0, 3).join('; ')}`;
-        if (result.errors.length > 3) {
-          message += ` (and ${result.errors.length - 3} more)`;
-        }
-      }
-      
+
       const severity = result.error_count > 0 ? 'error' : (result.imported_count > 0 ? 'success' : 'error');
-      
-      setUploadDialogOpen(false);
-      setFile(null);
-      
-      // Only reload if we have a pay period selected
+
       if (selectedPayPeriod) {
         loadAttendance();
         setSnackbar({ open: true, message, severity });
       } else {
-        // Show detailed message about needing to select pay period
         let payPeriodMessage = message;
         if (result.imported_count > 0) {
           payPeriodMessage += `. IMPORTANT: Please select a pay period that includes the uploaded dates to view the records in the attendance list.`;
         } else if (result.skipped_count > 0) {
           payPeriodMessage += `. Note: Select a pay period to view existing records.`;
         }
-        setSnackbar({ 
-          open: true, 
-          message: payPeriodMessage, 
-          severity: severity 
+        setSnackbar({
+          open: true,
+          message: payPeriodMessage,
+          severity,
         });
       }
     } catch (error: any) {
@@ -1767,7 +1783,15 @@ const AttendancePage: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setUploadDialogOpen(true)}>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setFile(null);
+              setUploadPreview(null);
+              setUploadResult(null);
+              setUploadDialogOpen(true);
+            }}
+          >
             <Upload className="size-4" /> Upload CSV
           </Button>
           <Button onClick={openManualEntry}>
@@ -1988,13 +2012,18 @@ const AttendancePage: React.FC = () => {
       <UploadCsvDialog
         open={uploadDialogOpen}
         file={file}
-        loading={loading}
-        onFileChange={setFile}
-        onUpload={handleUploadCSV}
-        onClose={() => {
-          setUploadDialogOpen(false);
-          setFile(null);
+        previewData={uploadPreview}
+        uploadResult={uploadResult}
+        previewLoading={previewLoading}
+        uploadLoading={loading}
+        onFileChange={(nextFile) => {
+          setFile(nextFile);
+          setUploadPreview(null);
+          setUploadResult(null);
         }}
+        onPreview={handlePreviewCSV}
+        onImport={handleUploadCSV}
+        onClose={resetUploadDialog}
       />
 
       <DeleteRangeDialog

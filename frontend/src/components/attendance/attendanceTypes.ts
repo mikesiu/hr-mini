@@ -89,3 +89,30 @@ export interface DetailedRowSubtotal {
 export type DetailedRowWithSubtotal =
   | { type: 'detail'; row: AttendanceDetailRow }
   | { type: 'subtotal'; subtotal: DetailedRowSubtotal };
+
+export interface AttendanceUploadPreviewRow {
+  row_number: number;
+  person_id: string;
+  name: string;
+  date: string;
+  check_in?: string | null;
+  check_out?: string | null;
+  status: 'valid' | 'invalid' | 'duplicate' | string;
+  error_message?: string | null;
+}
+
+export interface AttendanceUploadPreview {
+  total_rows: number;
+  valid_rows: number;
+  invalid_rows: number;
+  duplicate_rows: number;
+  rows: AttendanceUploadPreviewRow[];
+}
+
+export interface AttendanceUploadResponse {
+  success: boolean;
+  imported_count: number;
+  skipped_count: number;
+  error_count: number;
+  errors: string[];
+}

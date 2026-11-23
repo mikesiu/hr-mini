@@ -285,8 +285,12 @@ async def preview_attendance_csv(
             date_str = str(row['Date']).strip()
             check_in_str = str(row['Check-In']).strip() if pd.notna(row['Check-In']) else None
             check_out_str = str(row['Check-out']).strip() if pd.notna(row['Check-out']) else None
+            if check_in_str in ['-', '', 'nan', 'None']:
+                check_in_str = None
+            if check_out_str in ['-', '', 'nan', 'None']:
+                check_out_str = None
             
-            # Validate row
+            # Validate row (same rules as import)
             status = "valid"
             error_message = None
             
@@ -297,31 +301,46 @@ async def preview_attendance_csv(
                 status = "invalid"
                 error_message = "Missing Date"
             else:
-                attendance_date = _parse_date(date_str)
-                if not attendance_date:
+                employee = get_employee(person_id)
+                if not employee:
                     status = "invalid"
-                    error_message = f"Invalid date format: {date_str}"
-                else:
-                    # Check for duplicate
-                    existing = get_attendance_for_date(person_id, attendance_date)
-                    if existing:
-                        status = "duplicate"
-                        duplicate_count += 1
+                    from repos.employee_repo import search_employees
+                    name_matches = search_employees(name) if name and name != 'nan' else []
+                    if name_matches:
+                        matching_ids = [emp.id for emp in name_matches[:3]]
+                        error_message = (
+                            f"Employee ID '{person_id}' does not exist. "
+                            f"Found '{name}' with ID(s): {', '.join(matching_ids)}"
+                        )
                     else:
-                        valid_count += 1
+                        error_message = f"Employee ID '{person_id}' does not exist"
+                else:
+                    attendance_date = _parse_date(date_str)
+                    if not attendance_date:
+                        status = "invalid"
+                        error_message = f"Invalid date format: {date_str}"
+                    else:
+                        existing = get_attendance_for_date(person_id, attendance_date)
+                        if existing:
+                            status = "duplicate"
+                            error_message = "Record already exists for this employee and date"
+                            duplicate_count += 1
+                        else:
+                            valid_count += 1
             
+            if status == "invalid":
+                invalid_count += 1
+
             preview_rows.append(AttendanceUploadPreviewRow(
                 row_number=row_number,
-                person_id=person_id,
-                name=name,
-                date=date_str,
-                check_in=check_in_str if check_in_str and check_in_str != '-' else None,
-                check_out=check_out_str if check_out_str and check_out_str != '-' else None,
+                person_id=person_id if person_id != 'nan' else '',
+                name=name if name != 'nan' else '',
+                date=date_str if date_str != 'nan' else '',
+                check_in=check_in_str,
+                check_out=check_out_str,
                 status=status,
                 error_message=error_message
             ))
-        
-        invalid_count = len(preview_rows) - valid_count - duplicate_count
         
         return AttendanceUploadPreview(
             total_rows=len(preview_rows),
