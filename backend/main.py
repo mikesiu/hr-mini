@@ -18,7 +18,7 @@ from api import auth, employees, employment, leaves, salary, work_permits, expen
 app = FastAPI(
     title="HR Mini API",
     description="HR Management System API",
-    version="1.0.0"
+    version="2.2.1"
 )
 
 # Request logging middleware
@@ -35,10 +35,19 @@ async def log_requests(request: Request, call_next):
     
     return response
 
-# CORS middleware for React frontend
+# CORS middleware for React frontend.
+# Vite production builds load JS with crossorigin; browsers reject the invalid
+# combination Access-Control-Allow-Origin: * + Allow-Credentials: true, which
+# shows up as a blank page. Reflect the request Origin instead.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for testing
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8888",
+        "http://127.0.0.1:8888",
+    ],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|(\d{1,3}\.){3}\d{1,3})(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -51,29 +60,19 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     print(f"Request URL: {request.url}")
     print(f"Request method: {request.method}")
     print(f"Request headers: {dict(request.headers)}")
-    response = JSONResponse(
+    return JSONResponse(
         status_code=422,
         content={"detail": "Validation error", "errors": exc.errors()}
     )
-    # Ensure CORS headers are added
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-    return response
 
 # Global exception handler for HTTP exceptions
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     print(f"HTTPException caught: {exc.status_code} - {exc.detail}")
-    response = JSONResponse(
+    return JSONResponse(
         status_code=exc.status_code,
         content={"detail": exc.detail}
     )
-    # Ensure CORS headers are added
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "*"
-    return response
 
 # Health check endpoint
 @app.get("/api/health")
@@ -118,9 +117,13 @@ _INDEX_HTML = _FRONTEND_BUILD / "index.html"
 _HAS_FRONTEND = _INDEX_HTML.is_file()
 
 if _HAS_FRONTEND:
+    # CRA used /static; Vite uses /assets. Mount whichever exists.
     _static_dir = _FRONTEND_BUILD / "static"
     if _static_dir.is_dir():
         app.mount("/static", StaticFiles(directory=str(_static_dir)), name="frontend-static")
+    _assets_dir = _FRONTEND_BUILD / "assets"
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="frontend-assets")
     print(f"Serving frontend from: {_FRONTEND_BUILD}")
 
     # index.html must not be cached, or browsers keep loading the previous build's JS after a rebuild
@@ -134,6 +137,9 @@ if _HAS_FRONTEND:
     async def serve_spa(full_path: str):
         # API routes are registered above; this only catches non-API paths.
         if full_path.startswith("api/") or full_path == "api":
+            raise HTTPException(status_code=404, detail="Not found")
+        # Never SPA-fallback missing hashed assets — that returns HTML as JS and blanks the UI.
+        if full_path.startswith(("assets/", "static/")):
             raise HTTPException(status_code=404, detail="Not found")
         candidate = (_FRONTEND_BUILD / full_path).resolve()
         try:

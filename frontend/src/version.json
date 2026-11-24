@@ -1,7 +1,16 @@
 {
-  "version": "2.2.0",
-  "release_date": "2026-11-23",
+  "version": "2.2.1",
+  "release_date": "2026-11-24",
   "history": [
+    {
+      "version": "2.2.1",
+      "date": "2026-11-24",
+      "changes": [
+        "Desktop app blank-screen fixes: correct CORS for Vite module scripts, serve /assets correctly, and stop returning index.html for missing JS/CSS files",
+        "Packaging scripts updated for Vite (VITE_API_URL); rebuild HRMini.exe with the current frontend",
+        "Error boundary added so UI crashes show a clear message instead of a blank page"
+      ]
+    },
     {
       "version": "2.2.0",
       "date": "2026-11-23",

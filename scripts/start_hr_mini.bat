@@ -18,7 +18,7 @@ if not exist "frontend\build\index.html" (
     pause
     exit /b 1
   )
-  set "REACT_APP_API_URL=/api"
+  set "VITE_API_URL=/api"
   set "NODE_OPTIONS=--no-deprecation"
   call npm run build
   if errorlevel 1 (

@@ -44,7 +44,7 @@ if errorlevel 1 (
 )
 
 echo [3/4] Building React production bundle (same-origin /api)...
-set "REACT_APP_API_URL=/api"
+set "VITE_API_URL=/api"
 set "NODE_OPTIONS=--no-deprecation"
 call npm run build
 if errorlevel 1 (
